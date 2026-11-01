@@ -179,3 +179,23 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+
+# Bases de dados locais e da pen drive
+*.db
+*.sqlite3
+
+# Binários pesados de motores standalone
+bin/
+*.exe
+ffmpeg
+ffprobe
+HandBrakeCLI
+
+# Ficheiros temporários, logs e outputs de conversão
+*.log
+temp/
+tmp/
+.yt-car-sync/
+yt-download/
+encoded/
+random_youtube_files/
