@@ -6,14 +6,9 @@ from pathlib import Path
 from database import DatabaseManager
 
 class MediaEngine:
-    def __init__(self, db_manager: DatabaseManager, handbrake_path: str = "HandBrakeCLI", preset_path: str = "CARRO PAI.json"):
-        """
-        Inicializa o motor multimédia. Espera que o binário do HandBrakeCLI e o ficheiro
-        CARRO PAI.json estejam na diretoria do projeto ou no PATH.
-        """
+    def __init__(self, db_manager: DatabaseManager, ffmpeg_path: str = "ffmpeg"):
         self.db = db_manager
-        self.handbrake_path = handbrake_path
-        self.preset_path = preset_path
+        self.ffmpeg_path = ffmpeg_path
         self.temp_dir = tempfile.gettempdir()
 
     def process_video(self, video_data: dict, ytdlp_opts: dict, destino_final_dir: str):
@@ -61,16 +56,23 @@ class MediaEngine:
 
     def _converter_video(self, input_path: str, output_path: str):
         """
-        Invoca o HandBrakeCLI como subprocesso, importando estritamente o preset JSON.
+        Invoca o FFmpeg estático para forçar o output a 320x240 (4:3) H.264/AAC,
+        replicando com exatidão o preset "CARRO PAI".
         """
         cmd = [
-            self.handbrake_path,
-            "--preset-import-file", self.preset_path,
-            "-Z", "CARRO PAI",
+            self.ffmpeg_path,
+            "-y", # Sobrescrever ficheiro se existir
             "-i", input_path,
-            "-o", output_path
+            "-c:v", "libx264",
+            "-profile:v", "baseline", # Máxima compatibilidade com centrais auto antigas
+            "-level", "3.0",
+            "-vf", "scale=320:240,setdar=16/9", # Força a resolução e diz ao player para esticar
+            "-r", "30", # Framerate a 30fps
+            "-c:a", "aac",
+            "-b:a", "160k",
+            "-ac", "2", # Stereo
+            output_path
         ]
-        # Executa o comando suprimindo o output do terminal (ou pode redirecionar para um logger)
         subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def _atualizar_status_db(self, youtube_id: str, status: str, caminho: str = None):
