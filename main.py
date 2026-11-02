@@ -112,11 +112,21 @@ class YTCarSyncApp(ctk.CTk):
         self.db_master_path = os.path.join(db_folder_usb, "database.db")
         db_slave_path = os.path.join(tempfile.gettempdir(), "yt_car_sync_temp.db")
         
-        # Se o pendrive já tiver um DB (Master), copia para o local (Slave)
+        # --- CORREÇÃO DA CONTAMINAÇÃO CRUZADA ---
         if os.path.exists(self.db_master_path):
+            # Se o pendrive já tem um DB (Master), sobrepõe o Slave local
             shutil.copy2(self.db_master_path, db_slave_path)
+        else:
+            # Se o pendrive é virgem, OBRIGATORIAMENTE apagamos o Slave local antigo
+            if os.path.exists(db_slave_path):
+                try:
+                    os.remove(db_slave_path)
+                except OSError:
+                    pass
+        # ----------------------------------------
             
-        # Instancia o gestor apontando para a cópia ultra-rápida no SSD local
+        # Instancia o gestor apontando para o SSD local
+        # Se os.remove foi chamado, ele criará um ficheiro em branco automaticamente
         self.db = DatabaseManager(db_path=db_slave_path)
         
         self._atualizar_ui_apos_media()
