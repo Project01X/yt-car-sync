@@ -295,18 +295,35 @@ class YTCarSyncApp(ctk.CTk):
             messagebox.showwarning("Aviso", "Selecione o Pendrive de destino primeiro.")
             return
 
-        if not colecao or colecao == getattr(self, 'placeholder_colecao', "") or not links_brutos:
-            messagebox.showwarning("Aviso", "Preencha o nome da coleção e insira pelo menos um link.")
+        if not colecao or colecao == getattr(self, 'placeholder_colecao', ""):
+            messagebox.showwarning("Aviso", "Preencha o nome da coleção.")
             return
 
+        # NOVO: Busca fontes na base de dados se a caixa de links estiver vazia
+        if not links_brutos:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT p.url FROM playlists p
+                    JOIN colecoes c ON p.colecao_id = c.id
+                    WHERE c.nome = ?
+                """, (colecao,))
+                urls_salvas = cursor.fetchall()
+                
+            if urls_salvas:
+                links_brutos = "\n".join([row['url'] for row in urls_salvas])
+                self.textbox_links.insert("end", links_brutos) # Dá feedback visual ao utilizador
+            else:
+                messagebox.showwarning("Aviso", "Insira pelo menos um link ou selecione uma coleção que já tenha fontes salvas.")
+                return
+
         self.progress_bar.set(0)
-        self.cancelar_flag = False # <-- Reset da flag
+        self.cancelar_flag = False
         
-        # Transforma o botão Iniciar no botão Cancelar
         self.btn_iniciar.configure(
             text="Cancelar Operação", 
             command=self._cancelar_operacao, 
-            fg_color="#EF4444", hover_color="#DC2626" # Vermelho
+            fg_color="#EF4444", hover_color="#DC2626"
         )
         
         thread = threading.Thread(target=self.fluxo_principal, args=(colecao, links_brutos), daemon=True)

@@ -38,66 +38,124 @@ class GerenciadorColecoesUI(ctk.CTkToplevel):
         self.grid_columnconfigure(1, weight=2) # Painel de detalhes (2/3)
         self.grid_rowconfigure(0, weight=1)
 
-        # ================= PAINEL ESQUERDO: LISTA DE COLEÇÕES =================
+        # ================= PAINEL ESQUERDO =================
         self.frame_lista = ctk.CTkFrame(self)
         self.frame_lista.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
-        
         ctk.CTkLabel(self.frame_lista, text="Suas Coleções", font=("Roboto", 16, "bold")).pack(pady=10)
-        
         self.scroll_colecoes = ctk.CTkScrollableFrame(self.frame_lista, fg_color="transparent")
         self.scroll_colecoes.pack(expand=True, fill="both", padx=5, pady=5)
 
-        # ================= PAINEL DIREITO: DETALHES E AÇÕES =================
+        # ================= PAINEL DIREITO =================
         self.frame_detalhes = ctk.CTkFrame(self)
         self.frame_detalhes.grid(row=0, column=1, padx=(0, 10), pady=10, sticky="nsew")
         
-        # Placeholder inicial
         self.lbl_nome_colecao = ctk.CTkLabel(self.frame_detalhes, text="Selecione uma coleção", font=("Roboto", 20, "bold"))
-        self.lbl_nome_colecao.pack(pady=20)
+        self.lbl_nome_colecao.pack(pady=15)
 
-        # Container de Controles (Inicia oculto/vazio até selecionar algo)
-        self.frame_controles = ctk.CTkFrame(self.frame_detalhes, fg_color="transparent")
+        # NOVO: Sistema de Abas
+        self.tabs = ctk.CTkTabview(self.frame_detalhes, fg_color="transparent")
         
-        ctk.CTkLabel(self.frame_controles, text="Modo de Ordem no Corolla:", font=("Roboto", 13)).pack(pady=(10, 2))
-        self.modo_ordem = ctk.CTkSegmentedButton(self.frame_controles, values=["Aleatório", "Ordenado"])
+        self.tab_regras = self.tabs.add("Regras & Ações")
+        self.tab_fontes = self.tabs.add("Fontes (Playlists/Links)")
+
+        # --- ABA 1: Regras e Ações ---
+        ctk.CTkLabel(self.tab_regras, text="Modo de Ordem no Corolla:", font=("Roboto", 13)).pack(pady=(10, 2))
+        self.modo_ordem = ctk.CTkSegmentedButton(self.tab_regras, values=["Aleatório", "Ordenado"])
         self.modo_ordem.pack(pady=5)
 
-        ctk.CTkLabel(self.frame_controles, text="Modo de Sincronia:", font=("Roboto", 13)).pack(pady=(15, 2))
-        self.modo_sincronia = ctk.CTkSegmentedButton(self.frame_controles, values=["Incremental", "Estrito"])
+        ctk.CTkLabel(self.tab_regras, text="Modo de Sincronia:", font=("Roboto", 13)).pack(pady=(15, 2))
+        self.modo_sincronia = ctk.CTkSegmentedButton(self.tab_regras, values=["Incremental", "Estrito"])
         self.modo_sincronia.pack(pady=5)
 
-        # Estatísticas da coleção
-        self.lbl_stats = ctk.CTkLabel(self.frame_controles, text="Vídeos baixados: 0", text_color="gray")
+        self.lbl_stats = ctk.CTkLabel(self.tab_regras, text="Vídeos baixados: 0", text_color="gray")
         self.lbl_stats.pack(pady=15)
 
-        # Botões de Ação
-        self.btn_salvar = ctk.CTkButton(self.frame_controles, text="Salvar Preferências", command=self._salvar_preferencias)
-        self.btn_salvar.pack(pady=10, fill="x", padx=40)
+        self.btn_salvar = ctk.CTkButton(self.tab_regras, text="Salvar Preferências", command=self._salvar_preferencias)
+        self.btn_salvar.pack(pady=5, fill="x", padx=40)
 
-        # NOVO: Botão para zerar falhas
-        self.btn_reset_erros = ctk.CTkButton(
-            self.frame_controles, 
-            text="Tentar Novamente Vídeos com Erro", 
-            command=self._resetar_erros,
-            fg_color="#D97706", hover_color="#B45309" # Laranja
-        )
-        self.btn_reset_erros.pack(pady=10, fill="x", padx=40)
+        self.btn_reset_erros = ctk.CTkButton(self.tab_regras, text="Tentar Novamente Vídeos com Erro", command=self._resetar_erros, fg_color="#D97706", hover_color="#B45309")
+        self.btn_reset_erros.pack(pady=5, fill="x", padx=40)
 
-        self.btn_reaplicar = ctk.CTkButton(
-            self.frame_controles, 
-            text="Reaplicar Ordem no Pendrive", 
-            command=self._forcar_reordenacao,
-            fg_color="#3B82F6", hover_color="#2563EB" # Azul
-        )
-        self.btn_reaplicar.pack(pady=10, fill="x", padx=40)
+        self.btn_reaplicar = ctk.CTkButton(self.tab_regras, text="Reaplicar Ordem no Pendrive", command=self._forcar_reordenacao, fg_color="#3B82F6", hover_color="#2563EB")
+        self.btn_reaplicar.pack(pady=5, fill="x", padx=40)
 
-        self.btn_excluir = ctk.CTkButton(
-            self.frame_controles, 
-            text="Excluir Coleção", 
-            command=self._excluir_colecao,
-            fg_color="#EF4444", hover_color="#DC2626" # Vermelho
+        self.btn_excluir = ctk.CTkButton(self.tab_regras, text="Excluir Coleção", command=self._excluir_colecao, fg_color="#EF4444", hover_color="#DC2626")
+        self.btn_excluir.pack(pady=(20, 10), fill="x", padx=40)
+
+        # --- ABA 2: Fontes Web ---
+        self.scroll_fontes = ctk.CTkScrollableFrame(self.tab_fontes, fg_color="transparent")
+        self.scroll_fontes.pack(expand=True, fill="both", padx=5, pady=5)
+        
+        self.btn_atualizar_remoto = ctk.CTkButton(
+            self.tab_fontes, 
+            text="Verificar Novas Mídias no YouTube", 
+            command=self._iniciar_atualizacao_remota,
+            fg_color="#059669", hover_color="#047857" # Verde
         )
-        self.btn_excluir.pack(pady=(30, 10), fill="x", padx=40)
+        self.btn_atualizar_remoto.pack(pady=10, fill="x", padx=40)
+
+    def _carregar_fontes(self):
+        """Lista todas as playlists e links associados à coleção atual."""
+        for widget in self.scroll_fontes.winfo_children():
+            widget.destroy()
+            
+        with self.db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, url FROM playlists WHERE colecao_id = ?", (self.colecao_atual_id,))
+            fontes = cursor.fetchall()
+            
+        if not fontes:
+            ctk.CTkLabel(self.scroll_fontes, text="Nenhuma fonte web associada.", text_color="gray").pack(pady=20)
+            return
+            
+        for f in fontes:
+            frame = ctk.CTkFrame(self.scroll_fontes, fg_color="gray20", corner_radius=5)
+            frame.pack(fill="x", pady=2, padx=2)
+            
+            lbl = ctk.CTkLabel(frame, text=f['url'], font=("Roboto", 11), anchor="w")
+            lbl.pack(side="left", padx=10, pady=5, expand=True, fill="x")
+            
+            btn_del = ctk.CTkButton(
+                frame, text="X", width=30, height=24, 
+                fg_color="#EF4444", hover_color="#DC2626",
+                command=lambda pid=f['id']: self._remover_fonte(pid)
+            )
+            btn_del.pack(side="right", padx=5, pady=5)
+
+    def _remover_fonte(self, playlist_id):
+        """Remove uma playlist e todos os seus vídeos da base de dados e do pendrive (via estrito)."""
+        confirm = messagebox.askyesno("Remover Fonte", "Remover esta URL apagará todos os vídeos associados a ela da coleção.\n\nDeseja continuar?")
+        if not confirm: return
+        
+        with self.db.get_connection() as conn:
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute("DELETE FROM playlists WHERE id = ?", (playlist_id,))
+            conn.commit()
+            
+        self._sincronizar_pendrive()
+        self._carregar_fontes()
+        self._carregar_detalhes(self.colecao_atual_id, self.colecao_atual_nome)
+        
+    def _iniciar_atualizacao_remota(self):
+        """Envia os links salvos de volta para a UI principal para buscar novos vídeos no YouTube."""
+        with self.db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT url FROM playlists WHERE colecao_id = ?", (self.colecao_atual_id,))
+            fontes = cursor.fetchall()
+            
+        if not fontes:
+            messagebox.showwarning("Aviso", "Não há fontes para atualizar.")
+            return
+            
+        urls = [f['url'] for f in fontes]
+        
+        self.master.nome_colecao.set(self.colecao_atual_nome)
+        self.master._ao_selecionar_colecao(self.colecao_atual_nome)
+        self.master.textbox_links.delete("1.0", "end")
+        self.master.textbox_links.insert("end", "\n".join(urls))
+        
+        self.destroy()
+        self.master.iniciar_processo_thread()
 
     def _limpar_lista(self):
         for widget in self.scroll_colecoes.winfo_children():
@@ -132,6 +190,7 @@ class GerenciadorColecoesUI(ctk.CTkToplevel):
         self.colecao_atual_id = colecao_id
         self.colecao_atual_nome = nome
         self.lbl_nome_colecao.configure(text=nome)
+        self._carregar_fontes()
         
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
@@ -156,7 +215,7 @@ class GerenciadorColecoesUI(ctk.CTkToplevel):
             self.lbl_stats.configure(text=f"Vídeos finalizados na coleção: {stats['total']}")
 
         # Exibe os controles agora que algo foi selecionado
-        self.frame_controles.pack(expand=True, fill="both")
+        self.tabs.pack(expand=True, fill="both", padx=10, pady=10)
 
     def _salvar_preferencias(self):
         if not self.colecao_atual_id: return
@@ -218,7 +277,7 @@ class GerenciadorColecoesUI(ctk.CTkToplevel):
         self._sincronizar_pendrive()
 
         self.colecao_atual_id = None
-        self.frame_controles.pack_forget()
+        self.tabs.pack_forget()
         self.lbl_nome_colecao.configure(text="Coleção Excluída")
         self._carregar_lista_colecoes()
         messagebox.showinfo("Sucesso", "Coleção e vídeos excluídos com sucesso.")
