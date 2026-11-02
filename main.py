@@ -31,15 +31,14 @@ class YTCarSyncApp(ctk.CTk):
         super().__init__()
         self.title("YT Car Sync - Toyota Corolla 2020")
         self.geometry("900x600")
+        
+        # Grid Principal: Colunas divididas igualmente, Linha 0 expande, Linha 1 fixa
         self.grid_columnconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=0)  # <-- Nova linha fixa para o rodapé
 
-        # Configuração (Bases de Dados e Motores instanciados aqui)
-        self.db = DatabaseManager()
-        # self.media_engine = MediaEngine(self.db)
-        # self.sync_engine = SyncEngine(self.db)
-
+        self.db = None
         self._build_ui()
 
     def _carregar_colecoes(self):
@@ -124,7 +123,7 @@ class YTCarSyncApp(ctk.CTk):
         self.frame_esq = ctk.CTkFrame(self)
         self.frame_esq.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
         
-        # --- NOVO: SELEÇÃO DE MÍDIA / PENDRIVE ---
+        # --- SELEÇÃO DE MÍDIA / PENDRIVE ---
         self.frame_media = ctk.CTkFrame(self.frame_esq, fg_color="transparent")
         self.frame_media.pack(pady=(0, 10), fill="x")
         
@@ -138,11 +137,10 @@ class YTCarSyncApp(ctk.CTk):
         self.btn_selecionar_media.pack(pady=5)
         
         ctk.CTkFrame(self.frame_esq, height=2, fg_color="gray30").pack(fill="x", pady=5) # Linha divisória
-        # ----------------------------------------
         
+        # --- CONFIGURAÇÃO DA COLEÇÃO ---
         ctk.CTkLabel(self.frame_esq, text="Configuração da Coleção", font=("Roboto", 16, "bold")).pack(pady=(10, 5))
         
-        # A caixa de coleções inicia bloqueada e vazia até o DB do pendrive ser lido
         self.placeholder_colecao = "Selecione a mídia primeiro..."
         self.nome_colecao = ctk.CTkComboBox(
             self.frame_esq, 
@@ -154,7 +152,6 @@ class YTCarSyncApp(ctk.CTk):
         self.nome_colecao.set(self.placeholder_colecao)
         self.nome_colecao.pack(pady=5)
 
-        # --- DICA TEMPORÁRIA ABAIXO DA CAIXA ---
         self.lbl_dica = ctk.CTkLabel(
             self.frame_esq, 
             text="💡 Dica: Selecione uma coleção ou escreva para criar nova.", 
@@ -162,19 +159,14 @@ class YTCarSyncApp(ctk.CTk):
             text_color="gray"
         )
         self.lbl_dica.pack(pady=(0, 5))
-        
-        # 1. CRIAR PRIMEIRO OS BOTÕES (Para que existam na memória)
+
         self.modo_sincronia = ctk.CTkSegmentedButton(self.frame_esq, values=["Incremental", "Estrito"])
         self.modo_sincronia.pack(pady=10)
-
         self.modo_ordem = ctk.CTkSegmentedButton(self.frame_esq, values=["Aleatório", "Ordenado"])
         self.modo_ordem.pack(pady=10)
 
-        # 2. DEFINIR OS VALORES PADRÃO 
-        # (Não tentamos ler as coleções aqui porque o utilizador ainda não escolheu o pendrive)
         self.modo_sincronia.set("Incremental") 
         self.modo_ordem.set("Aleatório")
-
 
         try:
             self.nome_colecao._entry.bind("<FocusIn>", self._ao_focar_combobox)
@@ -182,21 +174,16 @@ class YTCarSyncApp(ctk.CTk):
             pass
 
         self.timer_dica = self.after(6000, self._remover_dica)
-        # ----------------------------------------
 
+        # --- LINKS E REGRAS ---
         ctk.CTkLabel(self.frame_esq, text="Links (Vídeos ou Playlists)", font=("Roboto", 14)).pack(pady=(15, 0))
         
-        # Caixa de texto multilinha para colar links misturados
         self.textbox_links = ctk.CTkTextbox(self.frame_esq, height=150, width=300)
         self.textbox_links.pack(pady=5)
 
-        # Regra de Negócio: UX/Input à prova de falhas
         self.check_ignorar_playlist = ctk.CTkCheckBox(self.frame_esq, text="Ignorar Playlists (Apenas Vídeo)")
         self.check_ignorar_playlist.set(True)
         self.check_ignorar_playlist.pack(pady=10)
-
-        self.btn_iniciar = ctk.CTkButton(self.frame_esq, text="Iniciar Sincronização", command=self.iniciar_processo_thread, fg_color="green", hover_color="darkgreen")
-        self.btn_iniciar.pack(pady=20)
 
         # ================= PAINEL DIREITO: LOGS E STATUS =================
         self.frame_dir = ctk.CTkFrame(self)
@@ -206,6 +193,29 @@ class YTCarSyncApp(ctk.CTk):
         
         self.console_log = ctk.CTkTextbox(self.frame_dir, state="disabled")
         self.console_log.pack(expand=True, fill="both", padx=10, pady=10)
+
+        # ================= RODAPÉ FIXO (LINHA 1): BARRA + BOTÃO =================
+        self.frame_rodape = ctk.CTkFrame(self, fg_color="transparent")
+        self.frame_rodape.grid(row=1, column=0, columnspan=2, padx=10, pady=(0, 10), sticky="ew")
+        
+        self.frame_rodape.grid_columnconfigure(0, weight=1)
+        self.frame_rodape.grid_columnconfigure(1, weight=0)
+
+        # Barra de Progresso mais grossa (height=28 acompanha o botão)
+        self.progress_bar = ctk.CTkProgressBar(self.frame_rodape, height=28)
+        self.progress_bar.grid(row=0, column=0, padx=(0, 10), sticky="ew")
+        self.progress_bar.set(0) # Usa int '0' estrito em vez de '0.0' para evitar o fragmento visual
+
+        self.btn_iniciar = ctk.CTkButton(
+            self.frame_rodape, 
+            text="Iniciar Sincronização", 
+            command=self.iniciar_processo_thread, 
+            fg_color="green", 
+            hover_color="darkgreen",
+            width=180,
+            height=28 # Fixado para igualar a barra
+        )
+        self.btn_iniciar.grid(row=0, column=1, sticky="e")
 
     def log(self, mensagem: str):
         """Injeta mensagens no console da interface de forma thread-safe."""
@@ -228,6 +238,7 @@ class YTCarSyncApp(ctk.CTk):
             messagebox.showwarning("Aviso", "Selecione o Pendrive de destino primeiro.")
             return
 
+        self.progress_bar.set(0) # <-- Adicione esta linha
         self.btn_iniciar.configure(state="disabled", text="A processar...")
         
         # Inicia a thread de trabalho
@@ -235,6 +246,7 @@ class YTCarSyncApp(ctk.CTk):
         thread.start()
 
     def fluxo_principal(self, colecao: str, links_brutos: str):
+        sucesso_total = False # Flag para rastrear se houve falhas críticas
         """Método executado em background que orquestra todos os módulos."""
         try:
             self.log(f"[*] A iniciar a coleção '{colecao}'...")
@@ -317,7 +329,6 @@ class YTCarSyncApp(ctk.CTk):
 
             with db.get_connection() as conn:
                 cursor = conn.cursor()
-                # Tenta processar pendentes ou que falharam em sessões anteriores
                 cursor.execute("""
                     SELECT v.* FROM videos v
                     JOIN playlists p ON v.playlist_id = p.id
@@ -325,37 +336,54 @@ class YTCarSyncApp(ctk.CTk):
                 """, (colecao_id,))
                 pendentes = cursor.fetchall()
 
-            # Antes: pasta_destino = os.path.abspath(f"./{colecao}")
-            # Agora: Aponta diretamente para o Pendrive
             pasta_destino = os.path.join(self.caminho_pendrive, colecao)
 
             if pendentes:
-                self.log(f"[*] A processar {len(pendentes)} vídeo(s)...")
+                total_videos = len(pendentes)
+                self.log(f"[*] A processar {total_videos} vídeo(s)...")
                 for idx, video in enumerate(pendentes):
-                    self.log(f" -> [{idx+1}/{len(pendentes)}] A descarregar e converter: {video['youtube_id']}")
+                    self.log(f" -> [{idx+1}/{total_videos}] A descarregar e converter: {video['youtube_id']}")
                     media_engine.process_video(video, opts, pasta_destino)
+                    
+                    # Atualiza a barra de progresso de forma thread-safe na GUI
+                    progresso = (idx + 1) / total_videos
+                    self.after(0, lambda p=progresso: self.progress_bar.set(p))
             else:
                 self.log("[+] Não há novos vídeos para processar.")
+                self.after(0, lambda: self.progress_bar.set(1.0)) # Enche a barra a 100%
 
-            # 5. Motor de Sincronia (Aleatoriedade, Limpeza e os.utime)
+            # 5. Motor de Sincronia
             self.log("[*] A aplicar regras de ordem cronológica e sincronia física...")
             sync_engine.executar_sincronia_colecao(colecao_id, pasta_destino)
 
-            self.log("[+] Operação concluída com sucesso! Os ficheiros estão na pasta local.")
+            self.log("[+] Operação concluída com sucesso!")
+            sucesso_total = True # Marca como sucesso
             
         except Exception as e:
             self.log(f"[!] ERRO CRÍTICO: {str(e)}")
         finally:
-            # 1. Grava as alterações do SSD (Slave) de volta para o Pendrive (Master)
+            # 1. Grava as alterações de volta para o Pendrive
             try:
                 if hasattr(self, 'db_master_path') and self.db_master_path:
-                    shutil.copy2(self.db.db_path, self.db_master_path)
-                    self.log("[+] Base de dados sincronizada com o pendrive com sucesso.")
+                    import shutil
+                    shutil.copy2(db.db_path, self.db_master_path)
+                    self.log("[+] DB sincronizado com pendrive.")
             except Exception as e:
-                self.log(f"[!] Erro ao guardar base de dados no pendrive: {str(e)}")
+                self.log(f"[!] Erro ao guardar DB: {str(e)}")
                 
-            # 2. Desbloqueia a interface apenas após concluir a cópia
-            self.after(0, lambda: self.btn_iniciar.configure(state="normal", text="Iniciar Sincronização"))
+            # 2. Desbloqueia a interface e exibe o status de conclusão
+            def restaurar_ui():
+                self.btn_iniciar.configure(state="normal")
+                if sucesso_total:
+                    self.btn_iniciar.configure(text="Concluído! ✔️", fg_color="darkgreen")
+                    self.progress_bar.set(1.0)
+                else:
+                    self.btn_iniciar.configure(text="Erro. Tentar Novamente", fg_color="#8B0000") # Vermelho escuro
+                
+                # Após 4 segundos, restaura a aparência original do botão para novos downloads
+                self.after(4000, lambda: self.btn_iniciar.configure(text="Iniciar Sincronização", fg_color="green"))
+                
+            self.after(0, restaurar_ui)
 if __name__ == "__main__":
     app = YTCarSyncApp()
     app.mainloop()
