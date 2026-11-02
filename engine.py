@@ -31,7 +31,7 @@ class MediaEngine:
             self._atualizar_status_db(youtube_id, "descarregado")
             
         except yt_dlp.utils.DownloadError:
-            self._atualizar_status_db(youtube_id, "erro")
+            self._incrementar_erro(youtube_id)
             return
 
         # 2. Conversão e Nomeação
@@ -67,7 +67,7 @@ class MediaEngine:
                 os.remove(temp_converted_filepath)
             if os.path.exists(raw_filepath):
                 os.remove(raw_filepath)
-            self._atualizar_status_db(youtube_id, "erro")
+            self._incrementar_erro(youtube_id)
 
     def _converter_video(self, input_path: str, output_path: str):
         """
@@ -103,4 +103,14 @@ class MediaEngine:
                     "UPDATE videos SET status = ? WHERE youtube_id = ?",
                     (status, youtube_id)
                 )
+            conn.commit()
+
+    def _incrementar_erro(self, youtube_id: str):
+        """Regista a falha e incrementa o contador de tentativas."""
+        with self.db.get_connection() as conn:
+            conn.execute("""
+                UPDATE videos 
+                SET status = 'erro', tentativas = tentativas + 1 
+                WHERE youtube_id = ?
+            """, (youtube_id,))
             conn.commit()

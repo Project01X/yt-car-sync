@@ -24,6 +24,15 @@ class GerenciadorColecoesUI(ctk.CTkToplevel):
         self._build_ui()
         self._carregar_lista_colecoes()
 
+    def _sincronizar_pendrive(self):
+        """Grava as alterações do SSD de volta para o banco de dados mestre no Pendrive."""
+        try:
+            # Acede ao caminho original guardado na janela principal (master)
+            if hasattr(self.master, 'db_master_path') and self.master.db_master_path:
+                shutil.copy2(self.db.db_path, self.master.db_master_path)
+        except Exception as e:
+            print(f"Erro ao sincronizar BD com o pendrive: {e}")
+
     def _build_ui(self):
         self.grid_columnconfigure(0, weight=1) # Lista lateral (1/3)
         self.grid_columnconfigure(1, weight=2) # Painel de detalhes (2/3)
@@ -64,6 +73,15 @@ class GerenciadorColecoesUI(ctk.CTkToplevel):
         # Botões de Ação
         self.btn_salvar = ctk.CTkButton(self.frame_controles, text="Salvar Preferências", command=self._salvar_preferencias)
         self.btn_salvar.pack(pady=10, fill="x", padx=40)
+
+        # NOVO: Botão para zerar falhas
+        self.btn_reset_erros = ctk.CTkButton(
+            self.frame_controles, 
+            text="Tentar Novamente Vídeos com Erro", 
+            command=self._resetar_erros,
+            fg_color="#D97706", hover_color="#B45309" # Laranja
+        )
+        self.btn_reset_erros.pack(pady=10, fill="x", padx=40)
 
         self.btn_reaplicar = ctk.CTkButton(
             self.frame_controles, 
@@ -153,6 +171,7 @@ class GerenciadorColecoesUI(ctk.CTkToplevel):
             )
             conn.commit()
             
+        self._sincronizar_pendrive()
         messagebox.showinfo("Sucesso", "Regras atualizadas no banco de dados!")
 
     def _forcar_reordenacao(self):
@@ -172,7 +191,8 @@ class GerenciadorColecoesUI(ctk.CTkToplevel):
             self.btn_reaplicar.configure(state="normal", text="Reaplicar Ordem no Pendrive")
 
     def _excluir_colecao(self):
-        if not self.colecao_atual_id: return
+        if self.colecao_atual_id is None:
+            return
         
         confirm = messagebox.askyesno(
             "Excluir Coleção", 
@@ -180,8 +200,9 @@ class GerenciadorColecoesUI(ctk.CTkToplevel):
         )
         if not confirm: return
 
-        # 1. Deleta do Banco de Dados (ON DELETE CASCADE cuidará das playlists e vídeos)
+        # 1. Deleta do Banco de Dados com PRAGMA forçado para limpar vídeos e playlists (CASCADE)
         with self.db.get_connection() as conn:
+            conn.execute("PRAGMA foreign_keys = ON") # <-- CRUCIAL PARA APAGAR OS VÍDEOS
             conn.execute("DELETE FROM colecoes WHERE id = ?", (self.colecao_atual_id,))
             conn.commit()
 
@@ -191,10 +212,43 @@ class GerenciadorColecoesUI(ctk.CTkToplevel):
             try:
                 shutil.rmtree(pasta_fisica)
             except Exception as e:
-                messagebox.showwarning("Aviso", f"A coleção foi removida do banco, mas houve um erro ao apagar a pasta física:\n{str(e)}")
+                messagebox.showwarning("Aviso", f"A coleção foi removida do banco, mas houve um erro ao apagar a pasta:\n{str(e)}")
+
+        # 3. Sincroniza a exclusão imediatamente com o pendrive
+        self._sincronizar_pendrive()
 
         self.colecao_atual_id = None
         self.frame_controles.pack_forget()
         self.lbl_nome_colecao.configure(text="Coleção Excluída")
         self._carregar_lista_colecoes()
-        messagebox.showinfo("Sucesso", "Coleção excluída com sucesso.")
+        messagebox.showinfo("Sucesso", "Coleção e vídeos excluídos com sucesso.")
+
+    def _resetar_erros(self):
+        """Zera o contador de tentativas e devolve os vídeos quebrados para o status pendente."""
+        if self.colecao_atual_id is None:
+            return
+        
+        with self.db.get_connection() as conn:
+            cursor = conn.cursor()
+            # Atualiza apenas os vídeos que pertencem às playlists desta coleção específica
+            cursor.execute("""
+                UPDATE videos 
+                SET status = 'pendente', tentativas = 0
+                WHERE status = 'erro' AND playlist_id IN (
+                    SELECT id FROM playlists WHERE colecao_id = ?
+                )
+            """, (self.colecao_atual_id,))
+            linhas_afetadas = cursor.rowcount
+            conn.commit()
+        
+        self._sincronizar_pendrive()
+
+        if linhas_afetadas > 0:
+            messagebox.showinfo(
+                "Sucesso", 
+                f"{linhas_afetadas} vídeo(s) redefinido(s) para a fila.\nEles serão baixados na próxima sincronização."
+            )
+            # Recarrega os detalhes para atualizar as estatísticas visuais, se houver
+            self._carregar_detalhes(self.colecao_atual_id, self.colecao_atual_nome)
+        else:
+            messagebox.showinfo("Aviso", "Não há vídeos com falha nesta coleção.")

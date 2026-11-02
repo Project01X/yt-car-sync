@@ -33,7 +33,8 @@ class YTCarSyncApp(ctk.CTk):
         super().__init__()
         self.title("YT Car Sync - Toyota Corolla 2020")
         self.geometry("900x650")
-        
+
+        self.cancelar_flag = False
         # Grid Principal: Colunas divididas igualmente, Linha 0 expande, Linha 1 fixa
         self.grid_columnconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=1)
@@ -280,21 +281,32 @@ class YTCarSyncApp(ctk.CTk):
         colecao = self.nome_colecao.get().strip()
         links_brutos = self.textbox_links.get("1.0", "end").strip()
 
-        # Impede que o placeholder seja usado como nome de coleção válido
-        if not colecao or colecao == getattr(self, 'placeholder_colecao', "") or not links_brutos:
-            messagebox.showwarning("Aviso", "Preencha o nome da coleção e insira pelo menos um link.")
-            return
-
         if not self.caminho_pendrive:
             messagebox.showwarning("Aviso", "Selecione o Pendrive de destino primeiro.")
             return
 
-        self.progress_bar.set(0) # <-- Adicione esta linha
-        self.btn_iniciar.configure(state="disabled", text="A processar...")
+        if not colecao or colecao == getattr(self, 'placeholder_colecao', "") or not links_brutos:
+            messagebox.showwarning("Aviso", "Preencha o nome da coleção e insira pelo menos um link.")
+            return
+
+        self.progress_bar.set(0)
+        self.cancelar_flag = False # <-- Reset da flag
         
-        # Inicia a thread de trabalho
+        # Transforma o botão Iniciar no botão Cancelar
+        self.btn_iniciar.configure(
+            text="Cancelar Operação", 
+            command=self._cancelar_operacao, 
+            fg_color="#EF4444", hover_color="#DC2626" # Vermelho
+        )
+        
         thread = threading.Thread(target=self.fluxo_principal, args=(colecao, links_brutos), daemon=True)
         thread.start()
+
+    def _cancelar_operacao(self):
+        """Ativa a flag de cancelamento e atualiza o estado do botão na UI."""
+        self.cancelar_flag = True
+        self.btn_iniciar.configure(state="disabled", text="A cancelar (Aguarde o vídeo atual)...")
+        self.log("[!] Pedido de cancelamento recebido. A interromper fila...")
 
     def fluxo_principal(self, colecao: str, links_brutos: str):
         sucesso_total = False # Flag para rastrear se houve falhas críticas
@@ -306,8 +318,8 @@ class YTCarSyncApp(ctk.CTk):
             sincronia = self.modo_sincronia.get().lower()
             ordem = self.modo_ordem.get().lower().replace("aleatório", "aleatorio")
 
-            # Instanciar os motores (com caminho resolvido dinamicamente para o binário)
-            db = DatabaseManager()
+            # CORREÇÃO: Usar a base de dados ativa carregada na memória (SSD Slave)
+            db = self.db
             
             # Deteta automaticamente se é Windows (.exe) ou Linux
             nome_binario = "ffmpeg.exe" if platform.system() == "Windows" else "ffmpeg"
@@ -336,6 +348,7 @@ class YTCarSyncApp(ctk.CTk):
 
             # 3. Resolução de Playlists e Inserção de Vídeos Pendentes
             for item in links_parseados:
+                if self.cancelar_flag: break
                 url = item['url']
                 with db.get_connection() as conn:
                     cursor = conn.cursor()
@@ -355,22 +368,26 @@ class YTCarSyncApp(ctk.CTk):
                 
                 with yt_dlp.YoutubeDL(ext_opts) as ydl:
                     info = ydl.extract_info(url, download=False)
-                    if not info:
-                        continue
-                    
+                    if not info: continue
                     entradas = info.get('entries', [info]) if 'entries' in info else [info]
                     
                     with db.get_connection() as conn:
+                        # NOVO: Inserção em Lote (Bulk Insert) para máxima performance
+                        videos_lote = []
                         for entry in entradas:
-                            if not entry or not entry.get('id'):
-                                continue
+                            if self.cancelar_flag: break
+                            if not entry or not entry.get('id'): continue
+                            
                             video_id = entry['id']
                             titulo = entry.get('title', video_id)
-                            # Regista como pendente. O status evita redownloads automáticos futuramente.
-                            conn.execute("""
+                            # Adiciona à lista na memória em vez de gravar no disco imediatamente
+                            videos_lote.append((playlist_id, video_id, titulo, 'pendente'))
+                            
+                        if videos_lote:
+                            conn.executemany("""
                                 INSERT OR IGNORE INTO videos (playlist_id, youtube_id, titulo, status)
-                                VALUES (?, ?, ?, 'pendente')
-                            """, (playlist_id, video_id, titulo))
+                                VALUES (?, ?, ?, ?)
+                            """, videos_lote)
                         conn.commit()
 
             # 4. Processamento dos Ficheiros Físicos
@@ -380,10 +397,22 @@ class YTCarSyncApp(ctk.CTk):
 
             with db.get_connection() as conn:
                 cursor = conn.cursor()
+                # NOVO: Conta quantos foram ignorados definitivamente
+                cursor.execute("""
+                    SELECT COUNT(*) as ignorados FROM videos v
+                    JOIN playlists p ON v.playlist_id = p.id
+                    WHERE p.colecao_id = ? AND v.status = 'erro' AND v.tentativas >= 3
+                """, (colecao_id,))
+                ignorados_definitivos = cursor.fetchone()['ignorados']
+                
+                if ignorados_definitivos > 0:
+                    self.log(f"[*] {ignorados_definitivos} vídeo(s) com falha crítica omitido(s) da fila (Limite de 3 tentativas).")
+
+                # NOVO: Filtra pendentes ou erros com menos de 3 tentativas
                 cursor.execute("""
                     SELECT v.* FROM videos v
                     JOIN playlists p ON v.playlist_id = p.id
-                    WHERE p.colecao_id = ? AND (v.status = 'pendente' OR v.status = 'erro')
+                    WHERE p.colecao_id = ? AND (v.status = 'pendente' OR (v.status = 'erro' AND v.tentativas < 3))
                 """, (colecao_id,))
                 pendentes = cursor.fetchall()
 
@@ -393,10 +422,13 @@ class YTCarSyncApp(ctk.CTk):
                 total_videos = len(pendentes)
                 self.log(f"[*] A processar {total_videos} vídeo(s)...")
                 for idx, video in enumerate(pendentes):
+                    if self.cancelar_flag: # <-- Verificação 3: Quebra da fila de conversão
+                        self.log("[-] Operação abortada pelo utilizador. Os vídeos restantes ficarão pendentes.")
+                        break
+                    
                     self.log(f" -> [{idx+1}/{total_videos}] A descarregar e converter: {video['youtube_id']}")
                     media_engine.process_video(video, opts, pasta_destino)
                     
-                    # Atualiza a barra de progresso de forma thread-safe na GUI
                     progresso = (idx + 1) / total_videos
                     self.after(0, lambda p=progresso: self.progress_bar.set(p))
             else:
@@ -424,16 +456,26 @@ class YTCarSyncApp(ctk.CTk):
                 
             # 2. Desbloqueia a interface e exibe o status de conclusão
             def restaurar_ui():
-                self.btn_iniciar.configure(state="normal")
+                self.btn_iniciar.configure(state="normal", command=self.iniciar_processo_thread)
                 
-                # NOVO GATILHO: Força a interface a recarregar as coleções da BD (caso uma nova tenha sido criada)
-                self._atualizar_ui_apos_media()
-                
-                if sucesso_total:
+                if self.cancelar_flag:
+                    self.btn_iniciar.configure(text="Operação Cancelada", fg_color="#D97706") # Laranja
+                elif sucesso_total:
                     self.btn_iniciar.configure(text="Concluído! ✔️", fg_color="darkgreen")
                     self.progress_bar.set(1.0)
+                    self.textbox_links.delete("1.0", "end") # UX: Limpa os links da caixa de texto
                 else:
                     self.btn_iniciar.configure(text="Erro. Tentar Novamente", fg_color="#8B0000")
+                
+                # --- CORREÇÃO AQUI: REFRESH GARANTIDO ---
+                # 1. Força a UI a reprocessar as listas a partir da BD
+                self._atualizar_ui_apos_media()
+                
+                # 2. Volta a selecionar a coleção que estava a ser editada
+                colecoes_atualizadas = self._carregar_colecoes()
+                if colecao in colecoes_atualizadas:
+                    self.nome_colecao.set(colecao)
+                    self._ao_selecionar_colecao(colecao)
                 
                 self.after(4000, lambda: self.btn_iniciar.configure(text="Iniciar Sincronização", fg_color="green"))
                 

@@ -46,6 +46,7 @@ class DatabaseManager:
             """)
 
             # Vídeos: Metadados do YouTube e rastreio do ficheiro local
+            # Tabela atualizada com a coluna 'tentativas'
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS videos (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,10 +56,17 @@ class DatabaseManager:
                     caminho_ficheiro TEXT,
                     data_modificacao REAL, 
                     status TEXT CHECK(status IN ('pendente', 'descarregado', 'convertido', 'erro')) DEFAULT 'pendente',
+                    tentativas INTEGER DEFAULT 0,
                     FOREIGN KEY (playlist_id) REFERENCES playlists (id) ON DELETE CASCADE
                 )
             """)
             
+            # Migração automática para bancos de dados já existentes
+            try:
+                cursor.execute("ALTER TABLE videos ADD COLUMN tentativas INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass # A coluna já existe, ignorar
+                
             conn.commit()
 
     def exportar_download_archive(self, caminho_txt: str):
