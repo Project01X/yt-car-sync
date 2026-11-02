@@ -154,6 +154,15 @@ class YTCarSyncApp(ctk.CTk):
         self.nome_colecao.set(self.placeholder_colecao)
         self.nome_colecao.pack(pady=5)
 
+        # --- DICA TEMPORÁRIA ABAIXO DA CAIXA ---
+        self.lbl_dica = ctk.CTkLabel(
+            self.frame_esq, 
+            text="💡 Dica: Selecione uma coleção ou escreva para criar nova.", 
+            font=("Roboto", 11), 
+            text_color="gray"
+        )
+        self.lbl_dica.pack(pady=(0, 5))
+        
         # 1. CRIAR PRIMEIRO OS BOTÕES (Para que existam na memória)
         self.modo_sincronia = ctk.CTkSegmentedButton(self.frame_esq, values=["Incremental", "Estrito"])
         self.modo_sincronia.pack(pady=10)
@@ -166,14 +175,6 @@ class YTCarSyncApp(ctk.CTk):
         self.modo_sincronia.set("Incremental") 
         self.modo_ordem.set("Aleatório")
 
-        # --- DICA TEMPORÁRIA ABAIXO DA CAIXA ---
-        self.lbl_dica = ctk.CTkLabel(
-            self.frame_esq, 
-            text="💡 Dica: Selecione uma coleção ou escreva para criar nova.", 
-            font=("Roboto", 11), 
-            text_color="gray"
-        )
-        self.lbl_dica.pack(pady=(0, 5))
 
         try:
             self.nome_colecao._entry.bind("<FocusIn>", self._ao_focar_combobox)
