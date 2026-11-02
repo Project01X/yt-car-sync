@@ -61,20 +61,16 @@ class InputParser:
 class YTDLPConfigurator:
     @staticmethod
     def get_base_options(download_archive_path: str = None) -> dict:
-        """
-        Gera o dicionário de opções para o yt-dlp injetando as regras de fallback
-        obrigatórias para contornar falhas de resolução e otimizar banda.
-        """
         opts = {
-            # Regra de Negócio: Garantir resolução máxima de 360p (para downscale perfeito para 240p)
-            # Fallback 1: worstvideo+bestaudio (caso não haja 360p exato)
-            # Fallback 2: best (caso o vídeo não tenha faixas separadas)
+            # Prioriza: vídeo até 360p + áudio de alta fidelidade separado
+            # Fallback 1: pior vídeo + melhor áudio
+            # Fallback 2: melhor stream combinada disponível
             'format': 'bestvideo[height<=360]+bestaudio/worstvideo+bestaudio/best',
             'merge_output_format': 'mp4',
             'quiet': True,
             'no_warnings': True,
-            'ignoreerrors': True, # Impede que um vídeo bloqueado interrompa toda a fila
-            'extract_flat': False, # Definido dinamicamente no motor de download
+            'ignoreerrors': True,
+            'extract_flat': False,
         }
         
         if download_archive_path:

@@ -1,7 +1,9 @@
 import os
 import subprocess
 import tempfile
+import shutil
 import yt_dlp
+import re
 from pathlib import Path
 from database import DatabaseManager
 
@@ -12,23 +14,18 @@ class MediaEngine:
         self.temp_dir = tempfile.gettempdir()
 
     def process_video(self, video_data: dict, ytdlp_opts: dict, destino_final_dir: str):
-        """
-        Executa o fluxo de download para o %TEMP%, conversão e movimento para a pen drive.
-        Atualiza o estado na base de dados a cada passo.
-        """
         youtube_id = video_data['youtube_id']
         url = f"https://www.youtube.com/watch?v={youtube_id}"
         
-        # Configurar yt-dlp para gravar ficheiro bruto no %TEMP%
+        # Caminho bruto no %TEMP% (SSD)
         raw_output_template = os.path.join(self.temp_dir, f"{youtube_id}_raw.%(ext)s")
         opts = ytdlp_opts.copy()
         opts['outtmpl'] = raw_output_template
 
-        # 1. Download Bruto
+        # 1. Download Bruto (Ocorre no SSD)
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=True)
-                # Obter o caminho real gerado pelo yt-dlp (com a extensão correta)
                 raw_filepath = ydl.prepare_filename(info)
                 
             self._atualizar_status_db(youtube_id, "descarregado")
@@ -37,40 +34,58 @@ class MediaEngine:
             self._atualizar_status_db(youtube_id, "erro")
             return
 
-        # 2. Conversão (HandBrakeCLI)
+        # 2. Conversão e Nomeação
         Path(destino_final_dir).mkdir(parents=True, exist_ok=True)
-        final_filename = f"{info.get('title', youtube_id)}.mp4".replace('/', '_').replace('\\', '_')
+        
+        titulo_bruto = info.get('title', youtube_id)
+        titulo_seguro = re.sub(r'[^\w\-_\. ]', '_', titulo_bruto)
+        titulo_seguro = re.sub(r'_+', '_', titulo_seguro).strip('_ ')
+        
+        final_filename = f"{titulo_seguro}.mp4"
+        
+        # Caminho temporário de conversão (Também no SSD)
+        temp_converted_filepath = os.path.join(self.temp_dir, f"{youtube_id}_conv.mp4")
+        # Caminho de destino final no Pendrive
         final_filepath = os.path.join(destino_final_dir, final_filename)
 
         try:
-            self._converter_video(raw_filepath, final_filepath)
+            # Transcodifica 100% no SSD local para máxima performance
+            self._converter_video(raw_filepath, temp_converted_filepath)
             
-            # Limpeza do ficheiro bruto no %TEMP%
+            # Transferência atômica: Move o vídeo finalizado de uma vez para o pendrive
+            shutil.move(temp_converted_filepath, final_filepath)
+            
+            # Limpeza do vídeo bruto residual no SSD
             if os.path.exists(raw_filepath):
                 os.remove(raw_filepath)
                 
             self._atualizar_status_db(youtube_id, "convertido", final_filepath)
             
-        except subprocess.CalledProcessError:
+        except (subprocess.CalledProcessError, Exception):
+            # Limpeza de arquivos temporários em caso de falha
+            if os.path.exists(temp_converted_filepath):
+                os.remove(temp_converted_filepath)
+            if os.path.exists(raw_filepath):
+                os.remove(raw_filepath)
             self._atualizar_status_db(youtube_id, "erro")
 
     def _converter_video(self, input_path: str, output_path: str):
         """
-        Invoca o FFmpeg estático para forçar o output a 320x240 (4:3) H.264/AAC,
-        replicando com exatidão o preset "CARRO PAI".
+        Invoca o FFmpeg estático forçando 320x240 (4:3) H.264 e áudio AAC de alta fidelidade (192k / 44.1kHz).
         """
         cmd = [
             self.ffmpeg_path,
-            "-y", # Sobrescrever ficheiro se existir
+            "-y",
             "-i", input_path,
             "-c:v", "libx264",
-            "-profile:v", "baseline", # Máxima compatibilidade com centrais auto antigas
+            "-profile:v", "baseline",
             "-level", "3.0",
-            "-vf", "scale=320:240,setdar=16/9", # Força a resolução e diz ao player para esticar
-            "-r", "30", # Framerate a 30fps
+            "-vf", "scale=320:240,setdar=16/9",
+            "-r", "30",
             "-c:a", "aac",
-            "-b:a", "160k",
-            "-ac", "2", # Stereo
+            "-b:a", "192k",    # Aumentado de 160k para 192k para mitigar a perda por re-encoding
+            "-ar", "44100",   # Taxa de amostragem de 44.1 kHz para evitar resampling degradante
+            "-ac", "2",       # Stereo
             output_path
         ]
         subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
