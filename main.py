@@ -67,6 +67,7 @@ class YTCarSyncApp(ctk.CTk):
 
         # Regra de Negócio: UX/Input à prova de falhas
         self.check_ignorar_playlist = ctk.CTkCheckBox(self.frame_esq, text="Ignorar Playlists (Apenas Vídeo)")
+        self.check_ignorar_playlist.set(True)
         self.check_ignorar_playlist.pack(pady=10)
 
         self.btn_iniciar = ctk.CTkButton(self.frame_esq, text="Iniciar Sincronização", command=self.iniciar_processo_thread, fg_color="green", hover_color="darkgreen")
@@ -151,7 +152,14 @@ class YTCarSyncApp(ctk.CTk):
                     conn.commit()
 
                 # Extrair metadados sem descarregar os ficheiros físicos (modo flat)
-                ext_opts = {'extract_flat': True, 'quiet': True, 'no_warnings': True, 'ignoreerrors': True}
+                ext_opts = {
+                    'extract_flat': True, 
+                    'quiet': True, 
+                    'no_warnings': True, 
+                    'ignoreerrors': True,
+                    'noplaylist': item['noplaylist']  # Correção: Injeção dinâmica da flag
+                }
+                
                 with yt_dlp.YoutubeDL(ext_opts) as ydl:
                     info = ydl.extract_info(url, download=False)
                     if not info:
