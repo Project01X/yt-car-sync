@@ -13,6 +13,8 @@ from database import DatabaseManager
 from youtube_parser import InputParser, YTDLPConfigurator
 from engine import MediaEngine
 from sync_engine import SyncEngine
+from manager_ui import GerenciadorColecoesUI
+from sync_engine import SyncEngine # Certifique-se de que está importado
 
 def get_resource_path(relative_path):
     """Obtém o caminho absoluto para recursos, compatível com o PyInstaller."""
@@ -30,7 +32,7 @@ class YTCarSyncApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("YT Car Sync - Toyota Corolla 2020")
-        self.geometry("900x600")
+        self.geometry("900x650")
         
         # Grid Principal: Colunas divididas igualmente, Linha 0 expande, Linha 1 fixa
         self.grid_columnconfigure(0, weight=1)
@@ -79,6 +81,20 @@ class YTCarSyncApp(ctk.CTk):
             self.nome_colecao.set("")
         self._remover_dica()
 
+    def _abrir_gerenciador(self):
+        """Abre a janela de gestão de coleções e passa as instâncias necessárias."""
+        if not self.caminho_pendrive or not hasattr(self, 'db'):
+            return
+            
+        sync_eng = SyncEngine(self.db)
+        
+        # Inicia a janela
+        janela = GerenciadorColecoesUI(self, self.db, sync_eng, self.caminho_pendrive)
+        
+        # NOVO GATILHO: Pausa a janela principal até o Gestor ser fechado, depois recarrega a UI
+        self.wait_window(janela)
+        self._atualizar_ui_apos_media()
+
     def _selecionar_media(self):
         """Abre o seletor, define o destino e inicializa a base de dados (Master/Slave)."""
         diretorio = filedialog.askdirectory(title="Selecione a raiz do Pendrive")
@@ -111,12 +127,18 @@ class YTCarSyncApp(ctk.CTk):
         valores = colecoes if colecoes else [self.placeholder_colecao]
         
         self.nome_colecao.configure(state="normal", values=valores)
+        self.btn_gerenciar.configure(state="normal") # Desbloqueia o gerenciador
         
         if colecoes:
             self.nome_colecao.set(colecoes[0])
             self._ao_selecionar_colecao(colecoes[0])
         else:
             self.nome_colecao.set(self.placeholder_colecao)
+
+    def _selecionar_tudo_links(self, event=None):
+        """Seleciona todo o texto na caixa de entrada de links usando Ctrl+A."""
+        self.textbox_links.tag_add("sel", "1.0", "end")
+        return "break"
 
     def _build_ui(self):
         # ================= PAINEL ESQUERDO: CONTROLOS =================
@@ -137,6 +159,16 @@ class YTCarSyncApp(ctk.CTk):
         self.btn_selecionar_media.pack(pady=5)
         
         ctk.CTkFrame(self.frame_esq, height=2, fg_color="gray30").pack(fill="x", pady=5) # Linha divisória
+
+        # Botão para abrir o gerenciador (Inicia desativado até o pendrive ser selecionado)
+        self.btn_gerenciar = ctk.CTkButton(
+            self.frame_esq, 
+            text="Gerenciar Coleções...", 
+            fg_color="#4B5563", hover_color="#374151", # Cinza
+            command=self._abrir_gerenciador,
+            state="disabled"
+        )
+        self.btn_gerenciar.pack(pady=(5, 15), fill="x", padx=20)
         
         # --- CONFIGURAÇÃO DA COLEÇÃO ---
         ctk.CTkLabel(self.frame_esq, text="Configuração da Coleção", font=("Roboto", 16, "bold")).pack(pady=(10, 5))
@@ -176,14 +208,33 @@ class YTCarSyncApp(ctk.CTk):
         self.timer_dica = self.after(6000, self._remover_dica)
 
         # --- LINKS E REGRAS ---
-        ctk.CTkLabel(self.frame_esq, text="Links (Vídeos ou Playlists)", font=("Roboto", 14)).pack(pady=(15, 0))
+        # Cria um mini-container para alinhar o título e o botão lado a lado
+        self.frame_links_header = ctk.CTkFrame(self.frame_esq, fg_color="transparent")
+        self.frame_links_header.pack(pady=(15, 0), fill="x", padx=20)
+
+        ctk.CTkLabel(self.frame_links_header, text="Links (Vídeos ou Playlists)", font=("Roboto", 14)).pack(side="left")
+
+        self.btn_limpar_links = ctk.CTkButton(
+            self.frame_links_header, 
+            text="Limpar", 
+            width=60, 
+            height=24,
+            fg_color="#4B5563", hover_color="#374151", 
+            command=lambda: self.textbox_links.delete("1.0", "end")
+        )
+        self.btn_limpar_links.pack(side="right")
         
-        self.textbox_links = ctk.CTkTextbox(self.frame_esq, height=150, width=300)
+        # Altura reduzida de 150 para 110 para evitar empurrar a checkbox para fora da janela
+        self.textbox_links = ctk.CTkTextbox(self.frame_esq, height=110, width=300)
         self.textbox_links.pack(pady=5)
+
+        # Habilita o Ctrl+A (tanto em minúsculo quanto maiúsculo/Caps Lock)
+        self.textbox_links.bind("<Control-a>", self._selecionar_tudo_links)
+        self.textbox_links.bind("<Control-A>", self._selecionar_tudo_links)
 
         self.check_ignorar_playlist = ctk.CTkCheckBox(self.frame_esq, text="Ignorar Playlists (Apenas Vídeo)")
         self.check_ignorar_playlist.set(True)
-        self.check_ignorar_playlist.pack(pady=10)
+        self.check_ignorar_playlist.pack(pady=5) # Reduzido o espaçamento (pady) para poupar espaço vertical
 
         # ================= PAINEL DIREITO: LOGS E STATUS =================
         self.frame_dir = ctk.CTkFrame(self)
@@ -374,13 +425,16 @@ class YTCarSyncApp(ctk.CTk):
             # 2. Desbloqueia a interface e exibe o status de conclusão
             def restaurar_ui():
                 self.btn_iniciar.configure(state="normal")
+                
+                # NOVO GATILHO: Força a interface a recarregar as coleções da BD (caso uma nova tenha sido criada)
+                self._atualizar_ui_apos_media()
+                
                 if sucesso_total:
                     self.btn_iniciar.configure(text="Concluído! ✔️", fg_color="darkgreen")
                     self.progress_bar.set(1.0)
                 else:
-                    self.btn_iniciar.configure(text="Erro. Tentar Novamente", fg_color="#8B0000") # Vermelho escuro
+                    self.btn_iniciar.configure(text="Erro. Tentar Novamente", fg_color="#8B0000")
                 
-                # Após 4 segundos, restaura a aparência original do botão para novos downloads
                 self.after(4000, lambda: self.btn_iniciar.configure(text="Iniciar Sincronização", fg_color="green"))
                 
             self.after(0, restaurar_ui)

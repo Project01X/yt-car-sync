@@ -41,24 +41,24 @@ class SyncEngine:
         if modo_ordem == 'aleatorio':
             random.shuffle(ficheiros)
         else:
-            ficheiros.sort()
+            # NOVO: Ordena estritamente pelo nome do arquivo final (ignorando caminhos de pastas e maiúsculas/minúsculas)
+            ficheiros.sort(key=lambda x: os.path.basename(x).lower())
 
-        # Define um ponto base no passado recente para aplicar os increments
-        base_time = time.time() - (len(ficheiros) * 5)
+        # Define um ponto base no passado recente
+        tempo_atual = time.time() - (len(ficheiros) * 5)
 
-        for index, caminho in enumerate(ficheiros):
-            # Espaçamento incremental de 3 a 5 segundos entre ficheiros consecutivos
-            espacamento = random.randint(3, 5)
-            novo_tempo = base_time + (index * espacamento)
+        for caminho in ficheiros:
+            # NOVO: Acumulador garantido (soma sempre de 3 a 5 segundos a partir do ÚLTIMO valor)
+            tempo_atual += random.randint(3, 5)
             
             # Aplica o timestamp de acesso e modificação (atime, mtime)
-            os.utime(caminho, (novo_tempo, novo_tempo))
+            os.utime(caminho, (tempo_atual, tempo_atual))
             
             # Atualiza o registo na base de dados
             with self.db.get_connection() as conn:
                 conn.execute(
                     "UPDATE videos SET data_modificacao = ? WHERE caminho_ficheiro = ?",
-                    (novo_tempo, caminho)
+                    (tempo_atual, caminho)
                 )
                 conn.commit()
 
