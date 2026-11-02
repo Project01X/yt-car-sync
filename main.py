@@ -34,11 +34,49 @@ class YTCarSyncApp(ctk.CTk):
         self.grid_rowconfigure(0, weight=1)
 
         # Configuração (Bases de Dados e Motores instanciados aqui)
-        # self.db = DatabaseManager()
+        self.db = DatabaseManager()
         # self.media_engine = MediaEngine(self.db)
         # self.sync_engine = SyncEngine(self.db)
 
         self._build_ui()
+
+    def _carregar_colecoes(self):
+        """Busca os nomes das coleções já existentes no banco de dados."""
+        with self.db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT nome FROM colecoes ORDER BY nome ASC")
+            return [row['nome'] for row in cursor.fetchall()]
+
+    def _ao_selecionar_colecao(self, nome_selecionado):
+        """Auto-preenche os modos de sincronia e ordem quando uma coleção existente é selecionada."""
+        with self.db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT modo_ordem, modo_sincronia FROM colecoes WHERE nome = ?", (nome_selecionado,))
+            col = cursor.fetchone()
+            if col:
+                # Ajusta a formatação para bater com os valores exatos dos Segmented Buttons
+                ordem = "Aleatório" if col['modo_ordem'] == "aleatorio" else "Ordenado"
+                sincronia = col['modo_sincronia'].capitalize()
+                
+                self.modo_ordem.set(ordem)
+                self.modo_sincronia.set(sincronia)
+
+    def _remover_dica(self):
+        """Remove o rótulo de dica da interface de forma segura."""
+        if hasattr(self, 'lbl_dica') and self.lbl_dica:
+            try:
+                self.lbl_dica.pack_forget()
+                self.lbl_dica.destroy()
+                self.lbl_dica = None
+            except Exception:
+                pass
+
+    def _ao_focar_combobox(self, event):
+        """Limpa o texto do combobox automaticamente se contiver o placeholder ao focar."""
+        valor_atual = self.nome_colecao.get()
+        if valor_atual == getattr(self, 'placeholder_colecao', ""):
+            self.nome_colecao.set("")
+        self._remover_dica()
 
     def _build_ui(self):
         # ================= PAINEL ESQUERDO: CONTROLOS =================
@@ -47,17 +85,50 @@ class YTCarSyncApp(ctk.CTk):
         
         ctk.CTkLabel(self.frame_esq, text="Configuração da Coleção", font=("Roboto", 16, "bold")).pack(pady=(10, 5))
         
-        self.nome_colecao = ctk.CTkEntry(self.frame_esq, placeholder_text="Nome da Coleção (ex: PenDrive_Carro)", width=300)
+        self.placeholder_colecao = "Digite o nome de uma nova coleção..."
+        colecoes_existentes = self._carregar_colecoes()
+        valores_combo = colecoes_existentes if colecoes_existentes else [self.placeholder_colecao]
+        
+        self.nome_colecao = ctk.CTkComboBox(
+            self.frame_esq, 
+            values=valores_combo, 
+            width=300,
+            command=self._ao_selecionar_colecao
+        )
         self.nome_colecao.pack(pady=5)
 
-        # Modos de Sincronia e Ordem (Segmented Buttons para UI limpa)
+        # 1. CRIAR PRIMEIRO OS BOTÕES (Para que existam na memória)
         self.modo_sincronia = ctk.CTkSegmentedButton(self.frame_esq, values=["Incremental", "Estrito"])
-        self.modo_sincronia.set("Incremental")
         self.modo_sincronia.pack(pady=10)
 
         self.modo_ordem = ctk.CTkSegmentedButton(self.frame_esq, values=["Aleatório", "Ordenado"])
-        self.modo_ordem.set("Aleatório")
         self.modo_ordem.pack(pady=10)
+
+        # 2. DEFINIR O VALOR INICIAL SÓ DEPOIS DE TUDO ESTAR CRIADO
+        if colecoes_existentes:
+            self.nome_colecao.set(colecoes_existentes[0])
+            self._ao_selecionar_colecao(colecoes_existentes[0])
+        else:
+            self.nome_colecao.set(self.placeholder_colecao)
+            self.modo_sincronia.set("Incremental") # Valor padrão de fallback
+            self.modo_ordem.set("Aleatório")       # Valor padrão de fallback
+
+        # --- DICA TEMPORÁRIA ABAIXO DA CAIXA ---
+        self.lbl_dica = ctk.CTkLabel(
+            self.frame_esq, 
+            text="💡 Dica: Selecione uma coleção ou escreva para criar nova.", 
+            font=("Roboto", 11), 
+            text_color="gray"
+        )
+        self.lbl_dica.pack(pady=(0, 5))
+
+        try:
+            self.nome_colecao._entry.bind("<FocusIn>", self._ao_focar_combobox)
+        except AttributeError:
+            pass
+
+        self.timer_dica = self.after(6000, self._remover_dica)
+        # ----------------------------------------
 
         ctk.CTkLabel(self.frame_esq, text="Links (Vídeos ou Playlists)", font=("Roboto", 14)).pack(pady=(15, 0))
         
@@ -94,7 +165,8 @@ class YTCarSyncApp(ctk.CTk):
         colecao = self.nome_colecao.get().strip()
         links_brutos = self.textbox_links.get("1.0", "end").strip()
 
-        if not colecao or not links_brutos:
+        # Impede que o placeholder seja usado como nome de coleção válido
+        if not colecao or colecao == getattr(self, 'placeholder_colecao', "") or not links_brutos:
             messagebox.showwarning("Aviso", "Preencha o nome da coleção e insira pelo menos um link.")
             return
 
