@@ -6,6 +6,8 @@ import platform
 import customtkinter as ctk
 import threading
 from tkinter import messagebox
+import shutil
+from tkinter import filedialog
 # Importação dos módulos anteriores (comente/ajuste conforme necessário para testar a UI primeiro)
 from database import DatabaseManager
 from youtube_parser import InputParser, YTDLPConfigurator
@@ -78,23 +80,78 @@ class YTCarSyncApp(ctk.CTk):
             self.nome_colecao.set("")
         self._remover_dica()
 
+    def _selecionar_media(self):
+        """Abre o seletor, define o destino e inicializa a base de dados (Master/Slave)."""
+        diretorio = filedialog.askdirectory(title="Selecione a raiz do Pendrive")
+        if not diretorio:
+            return
+            
+        self.caminho_pendrive = diretorio
+        self.lbl_caminho.configure(text=self.caminho_pendrive, text_color="white")
+        
+        # Cria a pasta oculta de sistema no pendrive para o DB
+        db_folder_usb = os.path.join(self.caminho_pendrive, ".yt-car-sync")
+        os.makedirs(db_folder_usb, exist_ok=True)
+        
+        self.db_master_path = os.path.join(db_folder_usb, "database.db")
+        db_slave_path = os.path.join(tempfile.gettempdir(), "yt_car_sync_temp.db")
+        
+        # Se o pendrive já tiver um DB (Master), copia para o local (Slave)
+        if os.path.exists(self.db_master_path):
+            shutil.copy2(self.db_master_path, db_slave_path)
+            
+        # Instancia o gestor apontando para a cópia ultra-rápida no SSD local
+        self.db = DatabaseManager(db_path=db_slave_path)
+        
+        self._atualizar_ui_apos_media()
+
+    def _atualizar_ui_apos_media(self):
+        """Desbloqueia os controlos da coleção após o DB do pendrive ser carregado."""
+        self.placeholder_colecao = "Digite o nome de uma nova coleção..."
+        colecoes = self._carregar_colecoes()
+        valores = colecoes if colecoes else [self.placeholder_colecao]
+        
+        self.nome_colecao.configure(state="normal", values=valores)
+        
+        if colecoes:
+            self.nome_colecao.set(colecoes[0])
+            self._ao_selecionar_colecao(colecoes[0])
+        else:
+            self.nome_colecao.set(self.placeholder_colecao)
+
     def _build_ui(self):
         # ================= PAINEL ESQUERDO: CONTROLOS =================
         self.frame_esq = ctk.CTkFrame(self)
         self.frame_esq.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
         
+        # --- NOVO: SELEÇÃO DE MÍDIA / PENDRIVE ---
+        self.frame_media = ctk.CTkFrame(self.frame_esq, fg_color="transparent")
+        self.frame_media.pack(pady=(0, 10), fill="x")
+        
+        ctk.CTkLabel(self.frame_media, text="Mídia de Destino (Pendrive)", font=("Roboto", 16, "bold")).pack(pady=(5, 2))
+        
+        self.caminho_pendrive = None
+        self.lbl_caminho = ctk.CTkLabel(self.frame_media, text="Nenhuma mídia selecionada", text_color="orange")
+        self.lbl_caminho.pack(pady=2)
+        
+        self.btn_selecionar_media = ctk.CTkButton(self.frame_media, text="Procurar Pendrive...", command=self._selecionar_media)
+        self.btn_selecionar_media.pack(pady=5)
+        
+        ctk.CTkFrame(self.frame_esq, height=2, fg_color="gray30").pack(fill="x", pady=5) # Linha divisória
+        # ----------------------------------------
+        
         ctk.CTkLabel(self.frame_esq, text="Configuração da Coleção", font=("Roboto", 16, "bold")).pack(pady=(10, 5))
         
-        self.placeholder_colecao = "Digite o nome de uma nova coleção..."
-        colecoes_existentes = self._carregar_colecoes()
-        valores_combo = colecoes_existentes if colecoes_existentes else [self.placeholder_colecao]
-        
+        # A caixa de coleções inicia bloqueada e vazia até o DB do pendrive ser lido
+        self.placeholder_colecao = "Selecione a mídia primeiro..."
         self.nome_colecao = ctk.CTkComboBox(
             self.frame_esq, 
-            values=valores_combo, 
+            values=[self.placeholder_colecao], 
             width=300,
-            command=self._ao_selecionar_colecao
+            command=self._ao_selecionar_colecao,
+            state="disabled" 
         )
+        self.nome_colecao.set(self.placeholder_colecao)
         self.nome_colecao.pack(pady=5)
 
         # 1. CRIAR PRIMEIRO OS BOTÕES (Para que existam na memória)
@@ -104,14 +161,10 @@ class YTCarSyncApp(ctk.CTk):
         self.modo_ordem = ctk.CTkSegmentedButton(self.frame_esq, values=["Aleatório", "Ordenado"])
         self.modo_ordem.pack(pady=10)
 
-        # 2. DEFINIR O VALOR INICIAL SÓ DEPOIS DE TUDO ESTAR CRIADO
-        if colecoes_existentes:
-            self.nome_colecao.set(colecoes_existentes[0])
-            self._ao_selecionar_colecao(colecoes_existentes[0])
-        else:
-            self.nome_colecao.set(self.placeholder_colecao)
-            self.modo_sincronia.set("Incremental") # Valor padrão de fallback
-            self.modo_ordem.set("Aleatório")       # Valor padrão de fallback
+        # 2. DEFINIR OS VALORES PADRÃO 
+        # (Não tentamos ler as coleções aqui porque o utilizador ainda não escolheu o pendrive)
+        self.modo_sincronia.set("Incremental") 
+        self.modo_ordem.set("Aleatório")
 
         # --- DICA TEMPORÁRIA ABAIXO DA CAIXA ---
         self.lbl_dica = ctk.CTkLabel(
@@ -168,6 +221,10 @@ class YTCarSyncApp(ctk.CTk):
         # Impede que o placeholder seja usado como nome de coleção válido
         if not colecao or colecao == getattr(self, 'placeholder_colecao', "") or not links_brutos:
             messagebox.showwarning("Aviso", "Preencha o nome da coleção e insira pelo menos um link.")
+            return
+
+        if not self.caminho_pendrive:
+            messagebox.showwarning("Aviso", "Selecione o Pendrive de destino primeiro.")
             return
 
         self.btn_iniciar.configure(state="disabled", text="A processar...")
@@ -267,7 +324,9 @@ class YTCarSyncApp(ctk.CTk):
                 """, (colecao_id,))
                 pendentes = cursor.fetchall()
 
-            pasta_destino = os.path.abspath(f"./{colecao}")
+            # Antes: pasta_destino = os.path.abspath(f"./{colecao}")
+            # Agora: Aponta diretamente para o Pendrive
+            pasta_destino = os.path.join(self.caminho_pendrive, colecao)
 
             if pendentes:
                 self.log(f"[*] A processar {len(pendentes)} vídeo(s)...")
@@ -286,6 +345,15 @@ class YTCarSyncApp(ctk.CTk):
         except Exception as e:
             self.log(f"[!] ERRO CRÍTICO: {str(e)}")
         finally:
+            # 1. Grava as alterações do SSD (Slave) de volta para o Pendrive (Master)
+            try:
+                if hasattr(self, 'db_master_path') and self.db_master_path:
+                    shutil.copy2(self.db.db_path, self.db_master_path)
+                    self.log("[+] Base de dados sincronizada com o pendrive com sucesso.")
+            except Exception as e:
+                self.log(f"[!] Erro ao guardar base de dados no pendrive: {str(e)}")
+                
+            # 2. Desbloqueia a interface apenas após concluir a cópia
             self.after(0, lambda: self.btn_iniciar.configure(state="normal", text="Iniciar Sincronização"))
 if __name__ == "__main__":
     app = YTCarSyncApp()
