@@ -1,5 +1,5 @@
 import customtkinter as ctk
-from tkinter import messagebox
+from tkinter import messagebox, ttk
 import os
 import shutil
 
@@ -13,6 +13,17 @@ class GerenciadorColecoesUI(ctk.CTkToplevel):
         # Garante que a janela fique no topo da principal
         self.transient(master)
         self.grab_set()
+
+        # Configuração do tema da Árvore (Treeview)
+        style = ttk.Style(self)
+        style.theme_use("default")
+        style.configure("Treeview", 
+                        background="#2b2b2b", 
+                        foreground="white", 
+                        rowheight=28, 
+                        fieldbackground="#2b2b2b", 
+                        borderwidth=0)
+        style.map('Treeview', background=[('selected', '#1f538d')])
 
         self.db = db_manager
         self.sync_engine = sync_engine
@@ -82,58 +93,215 @@ class GerenciadorColecoesUI(ctk.CTkToplevel):
         self.btn_excluir = ctk.CTkButton(self.tab_regras, text="Excluir Coleção", command=self._excluir_colecao, fg_color="#EF4444", hover_color="#DC2626")
         self.btn_excluir.pack(pady=(20, 10), fill="x", padx=40)
 
-        # --- ABA 2: Fontes Web ---
-        self.scroll_fontes = ctk.CTkScrollableFrame(self.tab_fontes, fg_color="transparent")
-        self.scroll_fontes.pack(expand=True, fill="both", padx=5, pady=5)
+        # --- ABA 2: Fontes Web (Gestão Avançada) ---
+        self.frame_tree = ctk.CTkFrame(self.tab_fontes, fg_color="transparent")
+        self.frame_tree.pack(expand=True, fill="both", padx=5, pady=5)
         
+        # Scrollbar e Treeview nativo do Tkinter
+        self.tree_scroll = ctk.CTkScrollbar(self.frame_tree)
+        self.tree_scroll.pack(side="right", fill="y")
+        
+        # Colunas ocultas para armazenar metadados: tipo, id_principal, id_secundario
+        self.tree = ttk.Treeview(self.frame_tree, selectmode="browse", yscrollcommand=self.tree_scroll.set, show="tree")
+        self.tree.pack(side="left", expand=True, fill="both")
+        self.tree_scroll.configure(command=self.tree.yview)
+        
+        self.tree.bind("<<TreeviewSelect>>", self._on_tree_select)
+
+        # Botões de Ação da Árvore
+        self.frame_acoes_tree = ctk.CTkFrame(self.tab_fontes, fg_color="transparent")
+        self.frame_acoes_tree.pack(fill="x", pady=5)
+
+        self.btn_mover = ctk.CTkButton(
+            self.frame_acoes_tree, text="Mover Selecionado", 
+            command=self._mover_selecionado, state="disabled", 
+            fg_color="#3B82F6", hover_color="#2563EB"
+        )
+        self.btn_mover.pack(side="left", expand=True, padx=5)
+
+        self.btn_excluir_tree = ctk.CTkButton(
+            self.frame_acoes_tree, text="Excluir Selecionado", 
+            command=self._excluir_selecionado, state="disabled", 
+            fg_color="#EF4444", hover_color="#DC2626"
+        )
+        self.btn_excluir_tree.pack(side="left", expand=True, padx=5)
+
         self.btn_atualizar_remoto = ctk.CTkButton(
             self.tab_fontes, 
             text="Verificar Novas Mídias no YouTube", 
             command=self._iniciar_atualizacao_remota,
-            fg_color="#059669", hover_color="#047857" # Verde
+            fg_color="#059669", hover_color="#047857"
         )
-        self.btn_atualizar_remoto.pack(pady=10, fill="x", padx=40)
+        self.btn_atualizar_remoto.pack(pady=10, fill="x", padx=5)
 
     def _carregar_fontes(self):
-        """Lista todas as playlists e links associados à coleção atual."""
-        for widget in self.scroll_fontes.winfo_children():
-            widget.destroy()
+        """Lista todas as playlists e vídeos da coleção atual com hierarquia visual."""
+        for item in self.tree.get_children():
+            self.tree.delete(item)
             
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT id, url FROM playlists WHERE colecao_id = ?", (self.colecao_atual_id,))
-            fontes = cursor.fetchall()
+            playlists = cursor.fetchall()
             
-        if not fontes:
-            ctk.CTkLabel(self.scroll_fontes, text="Nenhuma fonte web associada.", text_color="gray").pack(pady=20)
-            return
+            cursor.execute("""
+                SELECT v.id, v.titulo, v.playlist_id, v.status
+                FROM videos v
+                JOIN playlists p ON v.playlist_id = p.id
+                WHERE p.colecao_id = ?
+            """, (self.colecao_atual_id,))
+            todos_videos = cursor.fetchall()
             
-        for f in fontes:
-            frame = ctk.CTkFrame(self.scroll_fontes, fg_color="gray20", corner_radius=5)
-            frame.pack(fill="x", pady=2, padx=2)
+        # Nó Pai para vídeos isolados
+        node_sem_categoria = self.tree.insert("", "end", text="📁 Sem Categoria (Vídeos Avulsos)", values=("grupo", None, None))
+        
+        for p in playlists:
+            p_id = p['id']
+            url = p['url']
+            videos_desta_pl = [v for v in todos_videos if v['playlist_id'] == p_id]
             
-            lbl = ctk.CTkLabel(frame, text=f['url'], font=("Roboto", 11), anchor="w")
-            lbl.pack(side="left", padx=10, pady=5, expand=True, fill="x")
-            
-            btn_del = ctk.CTkButton(
-                frame, text="X", width=30, height=24, 
-                fg_color="#EF4444", hover_color="#DC2626",
-                command=lambda pid=f['id']: self._remover_fonte(pid)
-            )
-            btn_del.pack(side="right", padx=5, pady=5)
+            if "list=" in url:
+                # É uma playlist estruturada
+                node_pl = self.tree.insert("", "end", text=f"🗂️ Playlist: {url}", values=("playlist", p_id, None))
+                for v in videos_desta_pl:
+                    icone = "✅" if v['status'] == 'convertido' else ("❌" if v['status'] == 'erro' else "⏳")
+                    # Bloqueamos a movimentação via atributo "video_playlist"
+                    self.tree.insert(node_pl, "end", text=f"  {icone} {v['titulo']}", values=("video_playlist", v['id'], p_id))
+            else:
+                # É um vídeo avulso (URL direta). Adicionamos sob a pasta "Sem Categoria"
+                for v in videos_desta_pl:
+                    icone = "✅" if v['status'] == 'convertido' else ("❌" if v['status'] == 'erro' else "⏳")
+                    # Salvamos o p_id na aba 3 (id_secundario) para mover o ficheiro independente
+                    self.tree.insert(node_sem_categoria, "end", text=f"  {icone} {v['titulo']}", values=("video_independente", v['id'], p_id))
+                    
+        self.tree.item(node_sem_categoria, open=True)
 
-    def _remover_fonte(self, playlist_id):
-        """Remove uma playlist e todos os seus vídeos da base de dados e do pendrive (via estrito)."""
-        confirm = messagebox.askyesno("Remover Fonte", "Remover esta URL apagará todos os vídeos associados a ela da coleção.\n\nDeseja continuar?")
-        if not confirm: return
+    def _on_tree_select(self, event):
+        """Regras de Negócio: Bloqueia a movimentação de vídeos de playlist."""
+        selecionado = self.tree.selection()
+        if not selecionado: return
+        
+        item = self.tree.item(selecionado[0])
+        tipo = item['values'][0]
+        
+        if tipo == "grupo": # O título "Sem Categoria" em si
+            self.btn_mover.configure(state="disabled")
+            self.btn_excluir_tree.configure(state="disabled")
+        elif tipo == "video_playlist":
+            self.btn_mover.configure(state="disabled") # PROTEÇÃO: Impede mover itens da playlist
+            self.btn_excluir_tree.configure(state="normal") # Mas permite apagá-los
+        else:
+            self.btn_mover.configure(state="normal")
+            self.btn_excluir_tree.configure(state="normal")
+
+    def _mover_selecionado(self):
+        """Abre uma janela Modal para selecionar a Coleção de Destino."""
+        selecionado = self.tree.selection()
+        if not selecionado: return
+        
+        item = self.tree.item(selecionado[0])
+        tipo = item['values'][0]
+        id_principal = item['values'][1]
+        id_secundario = item['values'][2]
         
         with self.db.get_connection() as conn:
-            conn.execute("PRAGMA foreign_keys = ON")
-            conn.execute("DELETE FROM playlists WHERE id = ?", (playlist_id,))
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, nome FROM colecoes WHERE id != ?", (self.colecao_atual_id,))
+            outras_colecoes = cursor.fetchall()
+            
+        if not outras_colecoes:
+            messagebox.showinfo("Aviso", "Não existem outras coleções para onde mover.")
+            return
+            
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Mover Item")
+        dialog.geometry("300x150")
+        dialog.transient(self)
+        dialog.grab_set()
+        
+        ctk.CTkLabel(dialog, text="Selecione a coleção de destino:").pack(pady=10)
+        combo_destino = ctk.CTkComboBox(dialog, values=[c['nome'] for c in outras_colecoes])
+        combo_destino.pack(pady=5)
+        
+        def confirmar():
+            nome_alvo = combo_destino.get()
+            dest_id = next((c['id'] for c in outras_colecoes if c['nome'] == nome_alvo), None)
+            if dest_id:
+                self._executar_movimentacao(tipo, id_principal, id_secundario, dest_id, nome_alvo)
+            dialog.destroy()
+            
+        ctk.CTkButton(dialog, text="Confirmar Transferência", command=confirmar).pack(pady=10)
+
+    def _executar_movimentacao(self, tipo, id_principal, p_id, dest_id, dest_nome):
+        """Move os ficheiros físicos no pendrive e atualiza o BD em simultâneo."""
+        pasta_destino = os.path.join(self.caminho_pendrive, dest_nome)
+        os.makedirs(pasta_destino, exist_ok=True)
+        
+        playlist_id_alvo = id_principal if tipo == "playlist" else p_id
+        
+        with self.db.get_connection() as conn:
+            cursor = conn.cursor()
+            # Encontra todos os arquivos .mp4 que precisam ser movidos
+            cursor.execute("SELECT id, caminho_ficheiro FROM videos WHERE playlist_id = ?", (playlist_id_alvo,))
+            videos = cursor.fetchall()
+            
+            for v in videos:
+                caminho_antigo = v['caminho_ficheiro']
+                if caminho_antigo and os.path.exists(caminho_antigo):
+                    nome_arq = os.path.basename(caminho_antigo)
+                    novo_caminho = os.path.join(pasta_destino, nome_arq)
+                    shutil.move(caminho_antigo, novo_caminho) # Ficheiro movido fisicamente
+                    cursor.execute("UPDATE videos SET caminho_ficheiro = ? WHERE id = ?", (novo_caminho, v['id']))
+            
+            # Reposiciona a fonte na base de dados
+            cursor.execute("UPDATE playlists SET colecao_id = ? WHERE id = ?", (dest_id, playlist_id_alvo))
             conn.commit()
             
         self._sincronizar_pendrive()
-        self._carregar_fontes()
+        self._carregar_detalhes(self.colecao_atual_id, self.colecao_atual_nome) # Recarrega a UI
+        messagebox.showinfo("Sucesso", "Transferência física e estrutural concluída!")
+
+    def _excluir_selecionado(self):
+        """Exclui o item do BD e remove o arquivo físico correspondente."""
+        selecionado = self.tree.selection()
+        if not selecionado: return
+        
+        item = self.tree.item(selecionado[0])
+        tipo = item['values'][0]
+        
+        if not messagebox.askyesno("Excluir", "Deseja excluir este item?\nOs arquivos físicos também serão deletados."): return
+            
+        with self.db.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            if tipo == "playlist": # Deleta a pasta lógica inteira
+                playlist_id = item['values'][1]
+                cursor.execute("SELECT caminho_ficheiro FROM videos WHERE playlist_id = ?", (playlist_id,))
+                for v in cursor.fetchall():
+                    if v['caminho_ficheiro'] and os.path.exists(v['caminho_ficheiro']):
+                        os.remove(v['caminho_ficheiro'])
+                
+                conn.execute("PRAGMA foreign_keys = ON") # Força cascata no SQLite
+                cursor.execute("DELETE FROM playlists WHERE id = ?", (playlist_id,))
+                
+            elif tipo in ("video_independente", "video_playlist"): # Deleta 1 único arquivo
+                video_id = item['values'][1]
+                playlist_id = item['values'][2]
+                
+                cursor.execute("SELECT caminho_ficheiro FROM videos WHERE id = ?", (video_id,))
+                v = cursor.fetchone()
+                if v and v['caminho_ficheiro'] and os.path.exists(v['caminho_ficheiro']):
+                    os.remove(v['caminho_ficheiro'])
+                    
+                cursor.execute("DELETE FROM videos WHERE id = ?", (video_id,))
+                
+                # Otimização: Se for vídeo isolado, a URL/Playlist fake morre junto com ele
+                if tipo == "video_independente":
+                    cursor.execute("DELETE FROM playlists WHERE id = ?", (playlist_id,))
+                    
+            conn.commit()
+            
+        self._sincronizar_pendrive()
         self._carregar_detalhes(self.colecao_atual_id, self.colecao_atual_nome)
         
     def _iniciar_atualizacao_remota(self):
