@@ -72,28 +72,29 @@ class MediaEngine:
 
     def _converter_video(self, input_path: str, output_path: str):
         """
-        Invoca o FFmpeg estático com os parâmetros exatos do preset HandBrake "CARRO PAI" 
-        (MPEG-4 Part 2, 320x240 4:3, 500kbps vídeo, AAC 160kbps estéreo).
+        Invoca o FFmpeg em MPEG-4 Part 2 com resolução no limite da central (352x264)
+        e bitrate otimizado para eliminar artefatos de compressão em cenas rápidas.
         """
         cmd = [
             self.ffmpeg_path,
             "-y",
             "-i", input_path,
-            "-c:v", "mpeg4",          # Codec MPEG-4 puro (MPEG-4 Part 2)
-            "-b:v", "500k",           # Bitrate médio de vídeo
-            "-s", "320x240",          # Resolução forçada
-            "-aspect", "4:3",         # Aspect ratio forçado para 4:3
+            "-c:v", "mpeg4",          
+            "-b:v", "1500k",          # Aumentado para 1.5 Mbps para eliminar os "quadrados"
+            "-maxrate", "2500k",      # Teto de bitrate para não engasgar o processador do carro
+            "-bufsize", "2500k",      # Buffer de segurança para picos de movimento
+            "-s", "352x264",          # Resolução máxima permitida mantendo proporção
+            "-aspect", "4:3",         # Aspect ratio travado em 4:3
             "-r", "30",               # Framerate fixo em 30 FPS
-            "-c:a", "aac",            # Codec de áudio nativo AAC
-            "-b:a", "160k",           # Bitrate de áudio
-            "-ac", "2",               # Mixdown para estéreo
+            "-c:a", "aac",            
+            "-b:a", "160k",           
+            "-ac", "2",               
             output_path
         ]
         
         # --- PREVINE A ABERTURA DO CMD NO WINDOWS ---
         creationflags = 0
         if platform.system() == "Windows":
-            # 0x08000000 é o código nativo do Windows para CREATE_NO_WINDOW
             creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
             
         subprocess.run(
