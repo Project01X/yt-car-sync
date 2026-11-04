@@ -72,21 +72,21 @@ class MediaEngine:
 
     def _converter_video(self, input_path: str, output_path: str):
         """
-        Invoca o FFmpeg estático forçando 320x240 (4:3) H.264 e áudio AAC de alta fidelidade (192k / 44.1kHz).
+        Invoca o FFmpeg estático com os parâmetros exatos do preset HandBrake "CARRO PAI" 
+        (MPEG-4 Part 2, 320x240 4:3, 500kbps vídeo, AAC 160kbps estéreo).
         """
         cmd = [
             self.ffmpeg_path,
             "-y",
             "-i", input_path,
-            "-c:v", "libx264",
-            "-profile:v", "baseline",
-            "-level", "3.0",
-            "-vf", "scale=320:240,setdar=16/9",
-            "-r", "30",
-            "-c:a", "aac",
-            "-b:a", "192k",    # Aumentado de 160k para 192k para mitigar a perda por re-encoding
-            "-ar", "44100",   # Taxa de amostragem de 44.1 kHz para evitar resampling degradante
-            "-ac", "2",       # Stereo
+            "-c:v", "mpeg4",          # Codec MPEG-4 puro (MPEG-4 Part 2)
+            "-b:v", "500k",           # Bitrate médio de vídeo
+            "-s", "320x240",          # Resolução forçada
+            "-aspect", "4:3",         # Aspect ratio forçado para 4:3
+            "-r", "30",               # Framerate fixo em 30 FPS
+            "-c:a", "aac",            # Codec de áudio nativo AAC
+            "-b:a", "160k",           # Bitrate de áudio
+            "-ac", "2",               # Mixdown para estéreo
             output_path
         ]
         
@@ -101,7 +101,7 @@ class MediaEngine:
             check=True, 
             stdout=subprocess.DEVNULL, 
             stderr=subprocess.DEVNULL,
-            creationflags=creationflags # <-- Aplica a regra silenciosamente
+            creationflags=creationflags
         )
 
     def _atualizar_status_db(self, youtube_id: str, status: str, caminho: str = None):
