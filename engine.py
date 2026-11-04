@@ -4,6 +4,7 @@ import tempfile
 import shutil
 import yt_dlp
 import re
+import platform
 from pathlib import Path
 from database import DatabaseManager
 
@@ -88,7 +89,20 @@ class MediaEngine:
             "-ac", "2",       # Stereo
             output_path
         ]
-        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        # --- PREVINE A ABERTURA DO CMD NO WINDOWS ---
+        creationflags = 0
+        if platform.system() == "Windows":
+            # 0x08000000 é o código nativo do Windows para CREATE_NO_WINDOW
+            creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+            
+        subprocess.run(
+            cmd, 
+            check=True, 
+            stdout=subprocess.DEVNULL, 
+            stderr=subprocess.DEVNULL,
+            creationflags=creationflags # <-- Aplica a regra silenciosamente
+        )
 
     def _atualizar_status_db(self, youtube_id: str, status: str, caminho: str = None):
         """Atualiza a máquina de estados do ficheiro na base de dados."""
