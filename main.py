@@ -1,13 +1,27 @@
 import os
 import sys
 import tempfile
-import yt_dlp
 import platform
-import customtkinter as ctk
 import threading
-from tkinter import messagebox
 import shutil
-from tkinter import filedialog
+import urllib.request
+import json
+from tkinter import filedialog, messagebox
+
+# --- SISTEMA DE AUTO-UPDATE DINÂMICO DO YT-DLP ---
+# Cria uma pasta oculta no diretório do utilizador (C:\Users\Nome\.yt-car-sync)
+USER_DATA_DIR = os.path.join(os.path.expanduser("~"), ".yt-car-sync")
+os.makedirs(USER_DATA_DIR, exist_ok=True)
+YTDLP_ZIP_PATH = os.path.join(USER_DATA_DIR, "yt-dlp.zip")
+
+# Se a atualização já tiver sido baixada, força o programa a ler o ficheiro novo PRIMEIRO
+if os.path.exists(YTDLP_ZIP_PATH):
+    sys.path.insert(0, YTDLP_ZIP_PATH)
+
+# Agora, o import puxará a versão do ZIP se existir, ou o fallback do .exe original
+import yt_dlp
+import customtkinter as ctk
+
 # Importação dos módulos anteriores (comente/ajuste conforme necessário para testar a UI primeiro)
 from database import DatabaseManager
 from youtube_parser import InputParser, YTDLPConfigurator
@@ -43,6 +57,7 @@ class YTCarSyncApp(ctk.CTk):
 
         self.db = None
         self._build_ui()
+        self._verificar_atualizacao_pendente()
 
     def _carregar_colecoes(self):
         """Busca os nomes das coleções já existentes no banco de dados."""
@@ -251,7 +266,20 @@ class YTCarSyncApp(ctk.CTk):
         self.frame_dir = ctk.CTkFrame(self)
         self.frame_dir.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
         
-        ctk.CTkLabel(self.frame_dir, text="Console de Processamento", font=("Roboto", 16, "bold")).pack(pady=(10, 5))
+        # Mini-container para o Título e o Botão de Update
+        self.frame_dir_header = ctk.CTkFrame(self.frame_dir, fg_color="transparent")
+        self.frame_dir_header.pack(fill="x", padx=10, pady=(10, 5))
+        
+        ctk.CTkLabel(self.frame_dir_header, text="Console de Processamento", font=("Roboto", 16, "bold")).pack(side="left")
+        
+        self.btn_update_motor = ctk.CTkButton(
+            self.frame_dir_header, 
+            text="Atualizar yt-dlp", 
+            width=100, height=24,
+            fg_color="#059669", hover_color="#047857", # Verde
+            command=self._baixar_atualizacao_motor
+        )
+        self.btn_update_motor.pack(side="right")
         
         self.console_log = ctk.CTkTextbox(self.frame_dir, state="disabled")
         self.console_log.pack(expand=True, fill="both", padx=10, pady=10)
@@ -279,6 +307,59 @@ class YTCarSyncApp(ctk.CTk):
         )
         self.btn_iniciar.grid(row=0, column=1, sticky="e")
 
+    def _baixar_atualizacao_motor(self):
+        """Baixa a última versão compilada do motor do YouTube diretamente do GitHub."""
+        def tarefa():
+            self.btn_update_motor.configure(state="disabled", text="A transferir...")
+            self.log("[*] A ligar aos servidores do GitHub para descarregar a última versão do yt-dlp...")
+            try:
+                # Link oficial (always points to the latest zipapp release)
+                url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp"
+                urllib.request.urlretrieve(url, YTDLP_ZIP_PATH)
+                
+                self.log("[+] Motor atualizado com sucesso! O novo ficheiro foi guardado no SSD.")
+                messagebox.showinfo(
+                    "Atualização Concluída", 
+                    "O motor de extração do YouTube foi atualizado com sucesso!\n\nPor favor, feche e abra o programa novamente para que o novo motor entre em funcionamento."
+                )
+            except Exception as e:
+                self.log(f"[!] Erro ao atualizar o motor: {str(e)}")
+            finally:
+                self.btn_update_motor.configure(state="normal", text="Atualizar yt-dlp")
+                
+        threading.Thread(target=tarefa, daemon=True).start()
+
+    def _verificar_atualizacao_pendente(self):
+        """Verifica silenciosamente na API do GitHub se o yt-dlp tem uma versão mais recente."""
+        def tarefa():
+            try:
+                # Obtém a versão local atual carregada na memória
+                versao_local = yt_dlp.version.__version__
+                #versao_local = "2000.01.01"  # FORÇANDO UMA VERSÃO MUITO ANTIGA PARA TESTE
+                
+                # Consulta a última versão lançada no GitHub
+                req = urllib.request.Request("https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest")
+                req.add_header("User-Agent", "YT-Car-Sync-App")
+                
+                with urllib.request.urlopen(req, timeout=5) as response:
+                    dados = json.loads(response.read().decode())
+                    versao_remota = dados.get("tag_name", "").replace("v", "")
+                
+                # Compara as versões (ex: "2024.04.09" < "2024.07.16")
+                if versao_remota and versao_remota > versao_local:
+                    # Atualiza a UI informando o utilizador (usando .after por estarmos numa thread)
+                    self.after(0, lambda: self.btn_update_motor.configure(
+                        text="⚠️ Update yt-dlp Disponível!", 
+                        fg_color="#D97706", # Laranja de alerta
+                        hover_color="#B45309"
+                    ))
+            except Exception:
+                # Se estiver sem internet ou o GitHub bloquear temporariamente, falha em silêncio.
+                # Não atrapalha a experiência do utilizador.
+                pass
+
+        threading.Thread(target=tarefa, daemon=True).start()
+    
     def log(self, mensagem: str):
         """Injeta mensagens no console da interface de forma thread-safe."""
         self.console_log.configure(state="normal")
