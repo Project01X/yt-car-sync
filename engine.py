@@ -72,20 +72,20 @@ class MediaEngine:
 
     def _converter_video(self, input_path: str, output_path: str):
         """
-        Invoca o FFmpeg em MPEG-4 Part 2 com resolução no limite da central (352x264)
-        e bitrate otimizado para eliminar artefatos de compressão em cenas rápidas.
+        Invoca o FFmpeg em MPEG-4 Part 2 com a resolução segura (320x240)
+        e bitrate otimizado (1.5 Mbps) para eliminar artefatos de compressão.
         """
         cmd = [
             self.ffmpeg_path,
             "-y",
             "-i", input_path,
             "-c:v", "mpeg4",          
-            "-b:v", "1500k",          # Aumentado para 1.5 Mbps para eliminar os "quadrados"
-            "-maxrate", "2500k",      # Teto de bitrate para não engasgar o processador do carro
-            "-bufsize", "2500k",      # Buffer de segurança para picos de movimento
-            "-s", "352x264",          # Resolução máxima permitida mantendo proporção
-            "-aspect", "4:3",         # Aspect ratio travado em 4:3
-            "-r", "30",               # Framerate fixo em 30 FPS
+            "-b:v", "1500k",          # Mantemos o bitrate alto para evitar quadrados!
+            "-maxrate", "2500k",      
+            "-bufsize", "2500k",      
+            "-s", "320x240",          # Voltamos para a resolução consagrada
+            "-aspect", "4:3",         
+            "-r", "30",               
             "-c:a", "aac",            
             "-b:a", "160k",           
             "-ac", "2",               
