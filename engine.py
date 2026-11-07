@@ -47,7 +47,11 @@ class MediaEngine:
             # Se não houver capítulos oficiais e o botão na interface estiver ativado, processa o áudio!
             if not capitulos and forcar_corte_cego:
                 print("[Engine] Sem Capítulos oficiais. A iniciar Análise Acústica de Silêncio...")
-                capitulos = self._gerar_capitulos_por_silencio(raw_filepath, info.get('duration', 0))
+                titulo_original = info.get('title', youtube_id)
+                canal_original = info.get('uploader', 'Canal Desconhecido') # NOVO: Puxa o canal
+                
+                # Passa os 4 dados para a inteligência
+                capitulos = self._gerar_capitulos_por_silencio(raw_filepath, info.get('duration', 0), titulo_original, canal_original, youtube_id)
 
             if capitulos:
                 # === MODO ÁLBUM (MÚLTIPLAS FAIXAS / CAPÍTULOS) ===
@@ -164,7 +168,7 @@ class MediaEngine:
         """Usa o FFmpeg para mapear cortes por silêncio e devolve uma lista no formato dos capítulos do yt-dlp."""
         cmd = [
             self.ffmpeg_path, "-i", filepath,
-            "-af", "silencedetect=noise=-40dB:d=2", # O padrão exato de 2.0 segundos que pediu!
+            "-af", "silencedetect=noise=-30dB:d=2", # O padrão exato de 2.0 segundos que pediu!
             "-f", "null", "-"
         ]
         
@@ -192,11 +196,13 @@ class MediaEngine:
             end = pontos_corte[i+1]
             duracao_faixa = end - start
             
-            if duracao_faixa > 60.0: # Regra Anti-Pausa Dramática (Músicas menores que 1min são fundidas)
+            if duracao_faixa > 60.0:
+                # Removemos o "Faixa X" daqui porque o main já coloca o "01 - " no início do ficheiro
                 capitulos_virtuais.append({
                     'start_time': start,
                     'end_time': end,
-                    'title': f"Faixa Desconhecida {len(capitulos_virtuais) + 1}"
+                    # NOME FINAL: "Titulo do Vídeo - Canal [ID]"
+                    'title': f"{titulo_original} - {canal_original} [{youtube_id}]"
                 })
                 
         return capitulos_virtuais

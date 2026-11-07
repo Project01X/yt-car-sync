@@ -46,7 +46,7 @@ class YTCarSyncApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("YT Car Sync - Toyota Corolla 2020")
-        self.geometry("900x650")
+        self.geometry("900x700")
 
         self.cancelar_flag = False
         # Grid Principal: Colunas divididas igualmente, Linha 0 expande, Linha 1 fixa
