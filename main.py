@@ -262,10 +262,21 @@ class YTCarSyncApp(ctk.CTk):
         self.check_ignorar_playlist.set(True)
         self.check_ignorar_playlist.pack(pady=5) # Reduzido o espaçamento (pady) para poupar espaço vertical
 
-        # --- NOVO BOTÃO DE IA DE SILÊNCIO ---
-        self.check_corte_cego = ctk.CTkCheckBox(self.frame_esq, text="✂️ Forçar corte por silêncio (Sem Capítulos)")
-        self.check_corte_cego.set(False) # Mantém desligado por segurança!
-        self.check_corte_cego.pack(pady=5)
+        # --- NOVO BOTÃO DE IA DE SILÊNCIO COM SELETOR ---
+        self.frame_ia = ctk.CTkFrame(self.frame_esq, fg_color="transparent")
+        self.frame_ia.pack(pady=5, fill="x", padx=20)
+        
+        self.check_corte_cego = ctk.CTkCheckBox(self.frame_ia, text="✂️ Corte Cego (Sem Capítulos)")
+        self.check_corte_cego.set(False)
+        self.check_corte_cego.pack(side="left")
+        
+        self.combo_silencio = ctk.CTkComboBox(
+            self.frame_ia, 
+            values=["1s (Agressivo)", "2s (Padrão)", "3s (Seguro)"], 
+            width=110
+        )
+        self.combo_silencio.set("2s (Padrão)")
+        self.combo_silencio.pack(side="right")
 
         # ================= PAINEL DIREITO: LOGS E STATUS =================
         self.frame_dir = ctk.CTkFrame(self)
@@ -427,11 +438,15 @@ class YTCarSyncApp(ctk.CTk):
         try:
             self.log(f"[*] A iniciar a coleção '{colecao}'...")
             
+            # Lógica para capturar as preferências da UI
             ignorar_pl = self.check_ignorar_playlist.get() == 1
             sincronia = self.modo_sincronia.get().lower()
             ordem = self.modo_ordem.get().lower().replace("aleatório", "aleatorio")
 
             forcar_corte_cego = self.check_corte_cego.get() == 1
+            
+            # NOVO: Extrai apenas o número (1, 2 ou 3) da string selecionada
+            segundos_silencio = int(self.combo_silencio.get().split("s")[0])
 
             # CORREÇÃO: Usar a base de dados ativa carregada na memória (SSD Slave)
             db = self.db
@@ -546,7 +561,7 @@ class YTCarSyncApp(ctk.CTk):
                         break
                     
                     self.log(f" -> [{idx+1}/{total_videos}] A descarregar e converter: {video['youtube_id']}")
-                    media_engine.process_video(video, opts, pasta_destino, forcar_corte_cego)
+                    media_engine.process_video(video, opts, pasta_destino, forcar_corte_cego, segundos_silencio)
                     
                     progresso = (idx + 1) / total_videos
                     self.after(0, lambda p=progresso: self.progress_bar.set(p))

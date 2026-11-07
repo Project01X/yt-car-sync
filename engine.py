@@ -14,7 +14,7 @@ class MediaEngine:
         self.ffmpeg_path = ffmpeg_path
         self.temp_dir = tempfile.gettempdir()
 
-    def process_video(self, video_data: dict, ytdlp_opts: dict, destino_final_dir: str, forcar_corte_cego: bool = False):
+    def process_video(self, video_data: dict, ytdlp_opts: dict, destino_final_dir: str, forcar_corte_cego: bool = False, segundos_silencio: int = 2):
         youtube_id = video_data['youtube_id']
         playlist_id = video_data['playlist_id']
         url = f"https://www.youtube.com/watch?v={youtube_id}"
@@ -51,7 +51,7 @@ class MediaEngine:
                 canal_original = info.get('uploader', 'Canal Desconhecido') # NOVO: Puxa o canal
                 
                 # Passa os 4 dados para a inteligência
-                capitulos = self._gerar_capitulos_por_silencio(raw_filepath, info.get('duration', 0), titulo_original, canal_original, youtube_id)
+                capitulos = self._gerar_capitulos_por_silencio(raw_filepath, info.get('duration', 0), titulo_original, canal_original, youtube_id, segundos_silencio)
 
             if capitulos:
                 # === MODO ÁLBUM (MÚLTIPLAS FAIXAS / CAPÍTULOS) ===
@@ -166,12 +166,12 @@ class MediaEngine:
             conn.execute("UPDATE videos SET status = 'erro', tentativas = tentativas + 1 WHERE youtube_id = ?", (youtube_id,))
             conn.commit()
 
-    def _gerar_capitulos_por_silencio(self, filepath: str, duracao_total: float, titulo_original: str, canal_original: str, youtube_id: str) -> list:
+    def _gerar_capitulos_por_silencio(self, filepath: str, duracao_total: float, titulo_original: str, canal_original: str, youtube_id: str, segundos_silencio: int) -> list:
         """Mapeia cortes por silêncio e aplica consolidação idiot-proof para proteger músicas progressivas."""
         # 1. Sensibilidade ajustada para -30dB para ignorar chiado do YouTube e 3s para evitar cortes fáceis
         cmd = [
             self.ffmpeg_path, "-i", filepath,
-            "-af", "silencedetect=noise=-30dB:d=3",
+            "-af", f"silencedetect=noise=-30dB:d={segundos_silencio}",
             "-f", "null", "-"
         ]
         
