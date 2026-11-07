@@ -164,45 +164,76 @@ class MediaEngine:
             conn.execute("UPDATE videos SET status = 'erro', tentativas = tentativas + 1 WHERE youtube_id = ?", (youtube_id,))
             conn.commit()
 
-    def _gerar_capitulos_por_silencio(self, filepath: str, duracao_total: float) -> list:
-        """Usa o FFmpeg para mapear cortes por silêncio e devolve uma lista no formato dos capítulos do yt-dlp."""
+    def _gerar_capitulos_por_silencio(self, filepath: str, duracao_total: float, titulo_original: str, canal_original: str, youtube_id: str) -> list:
+        """Mapeia cortes por silêncio e aplica consolidação idiot-proof para proteger músicas progressivas."""
+        # 1. Sensibilidade ajustada para -30dB para ignorar chiado do YouTube e 3s para evitar cortes fáceis
         cmd = [
             self.ffmpeg_path, "-i", filepath,
-            "-af", "silencedetect=noise=-30dB:d=2", # O padrão exato de 2.0 segundos que pediu!
+            "-af", "silencedetect=noise=-30dB:d=3",
             "-f", "null", "-"
         ]
         
         creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000) if platform.system() == "Windows" else 0
-        
-        # O FFmpeg envia o relatório de silêncio para o stderr
         result = subprocess.run(cmd, stderr=subprocess.PIPE, text=True, creationflags=creationflags)
         
-        capitulos_virtuais = []
-        pontos_corte = [0.0] # Começa no segundo 0
-        
-        # Lê o relatório e extrai os tempos onde a música volta (silence_end)
+        # 2. Extrai os tempos exatos onde a música ACABA (start) e COMEÇA (end)
+        tempos_silencio = []
         for linha in result.stderr.split('\n'):
-            if "silence_end" in linha:
+            if "silence_start" in linha:
+                match = re.search(r'silence_start: ([\d\.]+)', linha)
+                if match:
+                    tempos_silencio.append({'tipo': 'start', 'tempo': float(match.group(1))})
+            elif "silence_end" in linha:
                 match = re.search(r'silence_end: ([\d\.]+)', linha)
                 if match:
-                    tempo_corte = float(match.group(1))
-                    pontos_corte.append(tempo_corte)
-        
-        pontos_corte.append(duracao_total) # Fim do vídeo
-        
-        # Constrói os capítulos filtrando pedaços com menos de 60 segundos
-        for i in range(len(pontos_corte) - 1):
-            start = pontos_corte[i]
-            end = pontos_corte[i+1]
-            duracao_faixa = end - start
+                    tempos_silencio.append({'tipo': 'end', 'tempo': float(match.group(1))})
+                    
+        if not tempos_silencio:
+            return []
             
-            if duracao_faixa > 60.0:
-                # Removemos o "Faixa X" daqui porque o main já coloca o "01 - " no início do ficheiro
-                capitulos_virtuais.append({
-                    'start_time': start,
-                    'end_time': end,
-                    # NOME FINAL: "Titulo do Vídeo - Canal [ID]"
-                    'title': f"{titulo_original} - {canal_original} [{youtube_id}]"
-                })
+        # 3. Constrói os fragmentos brutos removendo o "ar morto"
+        faixas_brutas = []
+        inicio_atual = 0.0
+        
+        for evento in tempos_silencio:
+            if evento['tipo'] == 'start':
+                fim_atual = evento['tempo']
+                if fim_atual > inicio_atual:
+                    faixas_brutas.append({'start': inicio_atual, 'end': fim_atual})
+            elif evento['tipo'] == 'end':
+                inicio_atual = evento['tempo']
                 
+        if duracao_total > inicio_atual:
+            faixas_brutas.append({'start': inicio_atual, 'end': duracao_total})
+
+        # 4. A Lógica Idiot-Proof: Mesclagem de Fragmentos Curtos
+        faixas_consolidadas = []
+        for faixa in faixas_brutas:
+            duracao_atual = faixa['end'] - faixa['start']
+            
+            if not faixas_consolidadas:
+                faixas_consolidadas.append(faixa)
+            else:
+                duracao_anterior = faixas_consolidadas[-1]['end'] - faixas_consolidadas[-1]['start']
+                
+                # Se a faixa atual for menor que 90s OU a anterior for menor que 90s, anula o corte!
+                if duracao_atual < 90.0 or duracao_anterior < 90.0:
+                    # Funde as duas faixas recuperando a integridade da música progressiva
+                    faixas_consolidadas[-1]['end'] = faixa['end']
+                else:
+                    faixas_consolidadas.append(faixa)
+                    
+        # Se depois da fusão sobrou só 1 faixa, não há quebras válidas no vídeo
+        if len(faixas_consolidadas) <= 1:
+            return []
+
+        # 5. Formatar para a interface final
+        capitulos_virtuais = []
+        for faixa in faixas_consolidadas:
+            capitulos_virtuais.append({
+                'start_time': faixa['start'],
+                'end_time': faixa['end'],
+                'title': f"{titulo_original} - {canal_original} [{youtube_id}]"
+            })
+            
         return capitulos_virtuais
