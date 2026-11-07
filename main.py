@@ -475,28 +475,32 @@ class YTCarSyncApp(ctk.CTk):
                 }
                 
                 with yt_dlp.YoutubeDL(ext_opts) as ydl:
-                    info = ydl.extract_info(url, download=False)
-                    if not info: continue
-                    entradas = info.get('entries', [info]) if 'entries' in info else [info]
-                    
-                    with db.get_connection() as conn:
-                        # NOVO: Inserção em Lote (Bulk Insert) para máxima performance
-                        videos_lote = []
-                        for entry in entradas:
-                            if self.cancelar_flag: break
-                            if not entry or not entry.get('id'): continue
+                    try: # NOVO: Bloco try para proteger contra metadados corrompidos (ex: VEVO)
+                        info = ydl.extract_info(url, download=False)
+                        if not info: continue
+                        entradas = info.get('entries', [info]) if 'entries' in info else [info]
+                        
+                        with db.get_connection() as conn:
+                            videos_lote = []
+                            for entry in entradas:
+                                if self.cancelar_flag: break
+                                if not entry or not entry.get('id'): continue
+                                
+                                video_id = entry['id']
+                                titulo = entry.get('title', video_id)
+                                videos_lote.append((playlist_id, video_id, titulo, 'pendente'))
+                                
+                            if videos_lote:
+                                conn.executemany("""
+                                    INSERT OR IGNORE INTO videos (playlist_id, youtube_id, titulo, status)
+                                    VALUES (?, ?, ?, ?)
+                                """, videos_lote)
+                            conn.commit()
                             
-                            video_id = entry['id']
-                            titulo = entry.get('title', video_id)
-                            # Adiciona à lista na memória em vez de gravar no disco imediatamente
-                            videos_lote.append((playlist_id, video_id, titulo, 'pendente'))
-                            
-                        if videos_lote:
-                            conn.executemany("""
-                                INSERT OR IGNORE INTO videos (playlist_id, youtube_id, titulo, status)
-                                VALUES (?, ?, ?, ?)
-                            """, videos_lote)
-                        conn.commit()
+                    except Exception as e:
+                        # Se o YouTube atirar um NoneType aqui, ignoramos o link e continuamos a construir a lista!
+                        self.log(f"   [!] Aviso: Não foi possível ler os metadados de '{url}'. A ignorar fonte...")
+                        continue
 
             # 4. Processamento dos Ficheiros Físicos
             archive_path = os.path.join(tempfile.gettempdir(), f"archive_{colecao_id}.txt")
@@ -571,7 +575,14 @@ class YTCarSyncApp(ctk.CTk):
                 elif sucesso_total:
                     self.btn_iniciar.configure(text="Concluído! ✔️", fg_color="darkgreen")
                     self.progress_bar.set(1.0)
-                    self.textbox_links.delete("1.0", "end") # UX: Limpa os links da caixa de texto
+                    self.textbox_links.delete("1.0", "end") # UX: Limpa os links
+                    
+                    # --- NOVO: RELATÓRIO FINAL POP-UP ---
+                    with db.get_connection() as conn:
+                        sucessos = conn.execute("SELECT COUNT(*) FROM videos v JOIN playlists p ON v.playlist_id = p.id WHERE p.colecao_id = ? AND v.status = 'convertido'", (colecao_id,)).fetchone()[0]
+                        erros = conn.execute("SELECT COUNT(*) FROM videos v JOIN playlists p ON v.playlist_id = p.id WHERE p.colecao_id = ? AND v.status = 'erro'", (colecao_id,)).fetchone()[0]
+                    messagebox.showinfo("Sincronização Finalizada!", f"✔️ {sucessos} músicas/vídeos prontos no Pendrive.\n❌ {erros} falhas (Verifique o log).")
+                    # ------------------------------------
                 else:
                     self.btn_iniciar.configure(text="Erro. Tentar Novamente", fg_color="#8B0000")
                 
