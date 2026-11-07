@@ -108,18 +108,23 @@ class MediaEngine:
             self._incrementar_erro(youtube_id)
 
     def _converter_video(self, input_path: str, output_path: str, start_time=None, end_time=None):
-        cmd = [self.ffmpeg_path, "-y", "-i", input_path]
+        cmd = [self.ffmpeg_path, "-y"]
         
-        # INJEÇÃO DE CORTES: Aplicado após o input para precisão absoluta e fiabilidade nos frames
+        # 1. FAST SEEKING: O -ss vem antes do input para saltar instantaneamente sem usar CPU
         if start_time is not None:
             cmd.extend(["-ss", str(start_time)])
-        if end_time is not None:
-            cmd.extend(["-to", str(end_time)])
+            
+        cmd.extend(["-i", input_path])
+        
+        # 2. Como o -ss zera o relógio do FFmpeg, usamos a duração (-t) em vez do tempo absoluto (-to)
+        if start_time is not None and end_time is not None:
+            duracao = float(end_time) - float(start_time)
+            cmd.extend(["-t", str(duracao)])
             
         cmd.extend([
             "-c:v", "mpeg4",          
-            "-b:v", "768k",           # VBR: Bitrate médio para poupar espaço
-            "-maxrate", "1500k",      # VBR: Limite máximo para impedir quadrados
+            "-b:v", "768k",           
+            "-maxrate", "1500k",      
             "-bufsize", "1500k",      
             "-s", "320x240",          
             "-aspect", "4:3",         
@@ -130,10 +135,7 @@ class MediaEngine:
             output_path
         ])
         
-        creationflags = 0
-        if platform.system() == "Windows":
-            creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-            
+        creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000) if platform.system() == "Windows" else 0
         subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=creationflags)
 
     def _atualizar_status_db(self, youtube_id: str, status: str, caminho: str = None):

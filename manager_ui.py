@@ -293,10 +293,13 @@ class GerenciadorColecoesUI(ctk.CTkToplevel):
                 if v and v['caminho_ficheiro'] and os.path.exists(v['caminho_ficheiro']):
                     os.remove(v['caminho_ficheiro'])
                     
-                cursor.execute("DELETE FROM videos WHERE id = ?", (video_id,))
-                
-                # Otimização: Se for vídeo isolado, a URL/Playlist fake morre junto com ele
-                if tipo == "video_independente":
+                # A MÁGICA DO SOFT DELETE: Em vez de apagar da base, criamos um "Blacklist" permanente
+                if tipo == "video_playlist":
+                    # Usa tentativas = 999 para indicar que o utilizador baniu esta música da playlist
+                    cursor.execute("UPDATE videos SET status = 'erro', tentativas = 999, caminho_ficheiro = NULL WHERE id = ?", (video_id,))
+                else:
+                    # Se for independente, a playlist é fictícia, logo podemos apagar tudo sem criar fantasmas
+                    cursor.execute("DELETE FROM videos WHERE id = ?", (video_id,))
                     cursor.execute("DELETE FROM playlists WHERE id = ?", (playlist_id,))
                     
             conn.commit()
@@ -451,17 +454,17 @@ class GerenciadorColecoesUI(ctk.CTkToplevel):
         messagebox.showinfo("Sucesso", "Coleção e vídeos excluídos com sucesso.")
 
     def _resetar_erros(self):
-        """Zera o contador de tentativas e devolve os vídeos quebrados para o status pendente."""
+        """Zera o contador de tentativas (ignorando os banidos com 999)."""
         if self.colecao_atual_id is None:
             return
         
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
-            # Atualiza apenas os vídeos que pertencem às playlists desta coleção específica
+            # O filtro "tentativas < 999" impede que as músicas "apagadas" voltem
             cursor.execute("""
                 UPDATE videos 
                 SET status = 'pendente', tentativas = 0
-                WHERE status = 'erro' AND playlist_id IN (
+                WHERE status = 'erro' AND tentativas < 999 AND playlist_id IN (
                     SELECT id FROM playlists WHERE colecao_id = ?
                 )
             """, (self.colecao_atual_id,))
@@ -471,11 +474,7 @@ class GerenciadorColecoesUI(ctk.CTkToplevel):
         self._sincronizar_pendrive()
 
         if linhas_afetadas > 0:
-            messagebox.showinfo(
-                "Sucesso", 
-                f"{linhas_afetadas} vídeo(s) redefinido(s) para a fila.\nEles serão baixados na próxima sincronização."
-            )
-            # Recarrega os detalhes para atualizar as estatísticas visuais, se houver
+            messagebox.showinfo("Sucesso", f"{linhas_afetadas} vídeo(s) redefinido(s) para a fila.")
             self._carregar_detalhes(self.colecao_atual_id, self.colecao_atual_nome)
         else:
-            messagebox.showinfo("Aviso", "Não há vídeos com falha nesta coleção.")
+            messagebox.showinfo("Aviso", "Não há vídeos com falha nesta coleção (músicas excluídas manualmente não contam como erro).")

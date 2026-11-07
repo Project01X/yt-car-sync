@@ -44,12 +44,12 @@ class SyncEngine:
             # NOVO: Ordena estritamente pelo nome do arquivo final (ignorando caminhos de pastas e maiúsculas/minúsculas)
             ficheiros.sort(key=lambda x: os.path.basename(x).lower())
 
-        # Define um ponto base no passado recente
-        tempo_atual = time.time() - (len(ficheiros) * 5)
+        # Define um ponto base no passado recente (margem ampliada)
+        tempo_atual = time.time() - (len(ficheiros) * 10)
 
         for caminho in ficheiros:
-            # NOVO: Acumulador garantido (soma sempre de 3 a 5 segundos a partir do ÚLTIMO valor)
-            tempo_atual += random.randint(3, 5)
+            # Incremento fixo de 6s garante compatibilidade com os blocos pares (2s) do sistema FAT32
+            tempo_atual += 6
             
             # Aplica o timestamp de acesso e modificação (atime, mtime)
             os.utime(caminho, (tempo_atual, tempo_atual))

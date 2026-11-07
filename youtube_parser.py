@@ -19,8 +19,8 @@ class InputParser:
             if not link:
                 continue
 
-            # Validação Regex básica para domínios do YouTube
-            if not re.search(r'(?:https?:\/\/)?(?:www\.)?(?:youtube\.com|youtu\.be)\/(?:watch\?v=|playlist\?list=|embed\/|shorts\/)?([a-zA-Z0-9_-]+)', link):
+            # Validação Regex robusta (agora suporta domínios de transmissões VOD /live/)
+            if not re.search(r'(?:https?:\/\/)?(?:www\.)?(?:youtube\.com|youtu\.be)\/(?:watch\?v=|playlist\?list=|embed\/|shorts\/|live\/)?([a-zA-Z0-9_-]+)', link):
                 continue
 
             if link in urls_vistas:
