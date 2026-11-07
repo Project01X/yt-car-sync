@@ -14,7 +14,7 @@ class MediaEngine:
         self.ffmpeg_path = ffmpeg_path
         self.temp_dir = tempfile.gettempdir()
 
-    def process_video(self, video_data: dict, ytdlp_opts: dict, destino_final_dir: str):
+    def process_video(self, video_data: dict, ytdlp_opts: dict, destino_final_dir: str, forcar_corte_cego: bool = False):
         youtube_id = video_data['youtube_id']
         playlist_id = video_data['playlist_id']
         url = f"https://www.youtube.com/watch?v={youtube_id}"
@@ -30,7 +30,7 @@ class MediaEngine:
                 if info is None:
                     raise Exception("O yt-dlp retornou metadados vazios (None).")
                 raw_filepath = ydl.prepare_filename(info)
-                capitulos = info.get('chapters', []) # NOVO: Puxa a lista de timestamps se existir
+                capitulos = info.get('chapters', []) # Puxa a lista de timestamps se existir
                 
             self._atualizar_status_db(youtube_id, "descarregado")
             
@@ -43,6 +43,12 @@ class MediaEngine:
         Path(destino_final_dir).mkdir(parents=True, exist_ok=True)
 
         try:
+            # === NOVA LÓGICA DE INTERCEPTAÇÃO (IA ACÚSTICA) ===
+            # Se não houver capítulos oficiais e o botão na interface estiver ativado, processa o áudio!
+            if not capitulos and forcar_corte_cego:
+                print("[Engine] Sem Capítulos oficiais. A iniciar Análise Acústica de Silêncio...")
+                capitulos = self._gerar_capitulos_por_silencio(raw_filepath, info.get('duration', 0))
+
             if capitulos:
                 # === MODO ÁLBUM (MÚLTIPLAS FAIXAS / CAPÍTULOS) ===
                 print(f"[Engine] {len(capitulos)} capítulos detetados! A iniciar fatiamento automático...")
@@ -108,14 +114,14 @@ class MediaEngine:
             
         cmd.extend([
             "-c:v", "mpeg4",          
-            "-b:v", "768k",           # Bitrate médio (volta para perto dos 675k originais para poupar muito espaço)
-            "-maxrate", "1500k",      # O Segredo: Só permite subir até 1500k em segundos de muita ação/explosões
+            "-b:v", "768k",           # VBR: Bitrate médio para poupar espaço
+            "-maxrate", "1500k",      # VBR: Limite máximo para impedir quadrados
             "-bufsize", "1500k",      
             "-s", "320x240",          
             "-aspect", "4:3",         
             "-r", "30",               
             "-c:a", "aac",            
-            "-b:a", "128k",           # Áudio reduzido de 160k para 128k (impercetível no carro, poupa 20% do peso do áudio)
+            "-b:a", "128k",           
             "-ac", "2",               
             output_path
         ])
@@ -153,3 +159,44 @@ class MediaEngine:
         with self.db.get_connection() as conn:
             conn.execute("UPDATE videos SET status = 'erro', tentativas = tentativas + 1 WHERE youtube_id = ?", (youtube_id,))
             conn.commit()
+
+    def _gerar_capitulos_por_silencio(self, filepath: str, duracao_total: float) -> list:
+        """Usa o FFmpeg para mapear cortes por silêncio e devolve uma lista no formato dos capítulos do yt-dlp."""
+        cmd = [
+            self.ffmpeg_path, "-i", filepath,
+            "-af", "silencedetect=noise=-40dB:d=2", # O padrão exato de 2.0 segundos que pediu!
+            "-f", "null", "-"
+        ]
+        
+        creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000) if platform.system() == "Windows" else 0
+        
+        # O FFmpeg envia o relatório de silêncio para o stderr
+        result = subprocess.run(cmd, stderr=subprocess.PIPE, text=True, creationflags=creationflags)
+        
+        capitulos_virtuais = []
+        pontos_corte = [0.0] # Começa no segundo 0
+        
+        # Lê o relatório e extrai os tempos onde a música volta (silence_end)
+        for linha in result.stderr.split('\n'):
+            if "silence_end" in linha:
+                match = re.search(r'silence_end: ([\d\.]+)', linha)
+                if match:
+                    tempo_corte = float(match.group(1))
+                    pontos_corte.append(tempo_corte)
+        
+        pontos_corte.append(duracao_total) # Fim do vídeo
+        
+        # Constrói os capítulos filtrando pedaços com menos de 60 segundos
+        for i in range(len(pontos_corte) - 1):
+            start = pontos_corte[i]
+            end = pontos_corte[i+1]
+            duracao_faixa = end - start
+            
+            if duracao_faixa > 60.0: # Regra Anti-Pausa Dramática (Músicas menores que 1min são fundidas)
+                capitulos_virtuais.append({
+                    'start_time': start,
+                    'end_time': end,
+                    'title': f"Faixa Desconhecida {len(capitulos_virtuais) + 1}"
+                })
+                
+        return capitulos_virtuais

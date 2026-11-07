@@ -262,6 +262,11 @@ class YTCarSyncApp(ctk.CTk):
         self.check_ignorar_playlist.set(True)
         self.check_ignorar_playlist.pack(pady=5) # Reduzido o espaçamento (pady) para poupar espaço vertical
 
+        # --- NOVO BOTÃO DE IA DE SILÊNCIO ---
+        self.check_corte_cego = ctk.CTkCheckBox(self.frame_esq, text="✂️ Forçar corte por silêncio (Sem Capítulos)")
+        self.check_corte_cego.set(False) # Mantém desligado por segurança!
+        self.check_corte_cego.pack(pady=5)
+
         # ================= PAINEL DIREITO: LOGS E STATUS =================
         self.frame_dir = ctk.CTkFrame(self)
         self.frame_dir.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
@@ -426,6 +431,8 @@ class YTCarSyncApp(ctk.CTk):
             sincronia = self.modo_sincronia.get().lower()
             ordem = self.modo_ordem.get().lower().replace("aleatório", "aleatorio")
 
+            forcar_corte_cego = self.check_corte_cego.get() == 1
+
             # CORREÇÃO: Usar a base de dados ativa carregada na memória (SSD Slave)
             db = self.db
             
@@ -539,7 +546,7 @@ class YTCarSyncApp(ctk.CTk):
                         break
                     
                     self.log(f" -> [{idx+1}/{total_videos}] A descarregar e converter: {video['youtube_id']}")
-                    media_engine.process_video(video, opts, pasta_destino)
+                    media_engine.process_video(video, opts, pasta_destino, forcar_corte_cego)
                     
                     progresso = (idx + 1) / total_videos
                     self.after(0, lambda p=progresso: self.progress_bar.set(p))
